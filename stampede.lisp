@@ -1,8 +1,9 @@
 (defpackage :stampede
-  (:use :cl :usocket)
+  (:use :cl :usocket :cl-ppcre)
   (:export
    :shutdown-server
-   :create-server))
+   :create-server
+   :http-protocol-reader))
 (in-package :stampede)
 
 (defun create-server (host port handler)
@@ -24,3 +25,18 @@
 
 (defun shutdown-server (server)
   (funcall server))
+
+(defun http-protocol-reader (stream)
+  (let* ((groups (multiple-value-bind (match groups)
+                   (scan-to-strings "(\\w+) (\\S+) (\\w+)/(\\S+)" (read-line stream))
+                 groups))
+         (method (svref groups 0))
+         (url (svref groups 1))
+         (http-protocol-version (svref groups 3)))
+    (append (list (cons :method method)
+                  (cons :url url)
+                  (cons :version http-protocol-version))
+            (loop for line = (read-line stream)
+               until (equal line "")
+               collect (let ((data (split ":" line)))
+                         (cons (first data) (string-trim " " (second data))))))))
