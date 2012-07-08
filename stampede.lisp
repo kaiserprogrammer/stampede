@@ -1,5 +1,5 @@
 (defpackage :stampede
-  (:use :cl :usocket :cl-ppcre)
+  (:use :cl :usocket :cl-ppcre :chanl)
   (:export
    :shutdown-server
    :create-server
@@ -7,10 +7,11 @@
    :http-protocol-writer))
 (in-package :stampede)
 
-(defun create-server (host port handler)
+(defun create-server (host port handler &key (worker-threads 1))
   (let* ((socket (usocket:socket-listen host
                                         port
                                         :reuse-address t))
+         (channel (make-instance 'unbounded-channel))
          (thread
           (sb-thread:make-thread
            (lambda ()
@@ -18,11 +19,23 @@
                   (loop
                      (usocket:wait-for-input socket)
                      (let ((stream (usocket:socket-stream (usocket:socket-accept socket))))
-                       (funcall handler stream)
-                       (close stream)))
-               (usocket:socket-close socket))))))
+                       (send channel stream)))
+               (usocket:socket-close socket)))))
+         (worker-threads
+          (loop repeat worker-threads
+               collect
+           (sb-thread:make-thread
+            (lambda ()
+              (loop
+                 (let ((stream (recv channel)))
+                   (ignore-errors
+                    (funcall handler stream)
+                    (close stream)))))))))
     (lambda ()
-      (sb-thread:destroy-thread thread))))
+      (ignore-errors
+        (sb-thread:destroy-thread thread)
+        (loop for worker in worker-threads
+           do (sb-thread:destroy-thread worker))))))
 
 (defun shutdown-server (server)
   (funcall server))
