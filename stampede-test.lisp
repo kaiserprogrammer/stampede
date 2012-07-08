@@ -35,6 +35,18 @@
                 ("blub" . "that"))
               (with-input-from-string (s (format nil "GET /url HTTP/1.0~%blub: that~%~%"))
                 (http-protocol-reader s)))))
-(test http-protocol-writer)
+
+(test http-protocol-writer
+  (is (equal "HTTP/1.1 200
+Content-Type: text/html; charset=utf-8
+
+blub
+"
+             (with-output-to-string (s)
+               (http-protocol-writer '((:status . 200)
+                                       (:version . "1.1")
+                                       ("Content-Type" . "text/html; charset=utf-8"))
+                                     "blub"
+                                     s)))))
 
 (run!)

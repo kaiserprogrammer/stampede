@@ -3,7 +3,8 @@
   (:export
    :shutdown-server
    :create-server
-   :http-protocol-reader))
+   :http-protocol-reader
+   :http-protocol-writer))
 (in-package :stampede)
 
 (defun create-server (host port handler)
@@ -42,3 +43,12 @@
                          (equal "" line))
                collect (let ((data (split ":" line)))
                          (cons (first data) (string-trim " " (second data))))))))
+(defun http-protocol-writer (data text stream)
+  (format stream "HTTP/~a ~a~%" (cdr (assoc :version data)) (cdr (assoc :status data)))
+  (loop for pair in data
+     when (not
+           (or (equal :version (car pair))
+               (equal :status (car pair))))
+     do (format stream "~a: ~a~%" (car pair) (cdr pair)))
+  (format stream "~%")
+  (format stream "~a~%" text))
