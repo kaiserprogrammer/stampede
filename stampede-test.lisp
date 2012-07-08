@@ -28,6 +28,12 @@
                 (:version . "1.0")
                 ("blub" . "that"))
               (with-input-from-string (s (format nil "GET /url HTTP/1.0~%blub: that~%~%"))
+                (http-protocol-reader s))))
+  (is (equalp '((:method . "GET")
+                (:url . "/url")
+                (:version . "1.0")
+                ("blub" . "that"))
+              (with-input-from-string (s (format nil "GET /url HTTP/1.0~%blub: that~%~%"))
                 (http-protocol-reader s)))))
 (test http-protocol-writer)
 

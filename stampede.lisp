@@ -28,8 +28,9 @@
 
 (defun http-protocol-reader (stream)
   (let* ((groups (multiple-value-bind (match groups)
-                   (scan-to-strings "(\\w+) (\\S+) (\\w+)/(\\S+)" (read-line stream))
-                 groups))
+                     (scan-to-strings "(\\w+) (\\S+) (\\w+)/(\\S+)" (read-line stream))
+                   (declare (ignore match))
+                   groups))
          (method (svref groups 0))
          (url (svref groups 1))
          (http-protocol-version (svref groups 3)))
@@ -37,6 +38,7 @@
                   (cons :url url)
                   (cons :version http-protocol-version))
             (loop for line = (read-line stream)
-               until (equal line "")
+               until (or (equal "" line)
+                         (equal "" line))
                collect (let ((data (split ":" line)))
-                         (cons (first data) (string-trim " " (second data))))))))
+                         (cons (first data) (string-trim " " (second data))))))))
