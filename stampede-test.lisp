@@ -11,6 +11,7 @@
                                  (lambda (stream)
                                    (declare (ignore stream))))))
       (shutdown-server server)
+      (sleep 0.02) ; wait for server to shutdown
       (signals connection-refused-error
         (with-client-socket (socket stream "127.0.0.1" 8080)
           (declare (ignore stream))))
@@ -18,6 +19,7 @@
                                    (lambda (stream)
                                      (declare (ignore stream))))))
         (shutdown-server server)
+        (sleep 0.02) ; wait for server to shutdown
         (signals connection-refused-error
           (with-client-socket (socket stream "127.0.0.1" 8080)
             (declare (ignore stream))))))))
