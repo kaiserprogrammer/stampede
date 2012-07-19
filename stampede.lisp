@@ -1,5 +1,5 @@
 (defpackage :stampede
-  (:use :cl :usocket :cl-ppcre :chanl)
+  (:use :cl :iolib :cl-ppcre :chanl)
   (:export
    :shutdown-server
    :create-server
@@ -9,34 +9,40 @@
 (in-package :stampede)
 
 (defun create-server (host port handler &key (worker-threads 1))
-  (let* ((socket (usocket:socket-listen host
-                                        port
-                                        :reuse-address t))
+  (let* ((socket (make-socket :connect :passive
+                              :address-family :internet
+                              :type :stream))
          (channel (make-instance 'unbounded-channel))
          (thread
-          (sb-thread:make-thread
-           (lambda ()
-             (unwind-protect
-                  (loop
-                     (usocket:wait-for-input socket)
-                     (let ((stream (usocket:socket-stream (usocket:socket-accept socket))))
-                       (send channel stream)))
-               (usocket:socket-close socket)))))
-         (worker-threads
+          (progn
+            (bind-address socket +ipv4-unspecified+
+                          :port port
+                          :reuse-address t)
+            (listen-on socket :backlog 5)
+            (bt:make-thread
+             (lambda ()
+               (unwind-protect
+                    (loop
+                       (let ((stream (accept-connection
+                                      socket
+                                      :wait t)))
+                         (send channel stream)))
+                 (close socket))))))
+         (pooled-worker-threads
           (loop repeat worker-threads
-               collect
-           (sb-thread:make-thread
-            (lambda ()
-              (loop
-                 (let ((stream (recv channel)))
-                   (ignore-errors
-                    (funcall handler stream)
-                    (close stream)))))))))
+             collect
+               (bt:make-thread
+                (lambda ()
+                  (loop
+                     (let ((stream (recv channel)))
+                       (unwind-protect
+                            (funcall handler stream)
+                         (close stream)))))))))
     (lambda ()
       (ignore-errors
-        (sb-thread:destroy-thread thread)
-        (loop for worker in worker-threads
-           do (sb-thread:destroy-thread worker))))))
+        (chanl:kill thread)
+        (loop for worker in pooled-worker-threads
+           do (chanl:kill worker))))))
 
 (defun shutdown-server (server)
   (funcall server))
