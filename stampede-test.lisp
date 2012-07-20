@@ -11,7 +11,7 @@
                                  (lambda (stream)
                                    (declare (ignore stream))))))
       (shutdown-server server)
-      (sleep 0.02) ; wait for server to shutdown
+      (sleep 0.002) ; wait for server to shutdown
       (signals connection-refused-error
         (with-client-socket (socket stream "127.0.0.1" 8080)
           (declare (ignore stream))))
@@ -19,12 +19,26 @@
                                    (lambda (stream)
                                      (declare (ignore stream))))))
         (shutdown-server server)
-        (sleep 0.02) ; wait for server to shutdown
+        (sleep 0.002) ; wait for server to shutdown
         (signals connection-refused-error
           (with-client-socket (socket stream "127.0.0.1" 8080)
             (declare (ignore stream))))))))
 
-(test http-protocol-reader
+(test connecting-to-server
+  (finishes
+    (let* (answer
+           (server (create-server "127.0.0.1" 8080
+                                  (lambda (stream)
+                                    (setf answer (read-line stream))))))
+      (with-client-socket (socket stream "127.0.0.1" 8080)
+        (format stream "client says~%")
+        (force-output stream))
+      (sleep 0.002)
+      (is (string= "client says" answer))
+      (shutdown-server server)
+      (sleep 0.002))))
+
+(test http-protocol-reader-get
   (let ((req (with-input-from-string
                  (s (format nil "GET /url HTTP/1.0~%blub: that~%~%"))
                (http-protocol-reader s))))
@@ -42,6 +56,24 @@
                                   ("blub" "that"))
        do (is (equal right
                      (cdr (assoc left req :test #'equal)))))))
+
+(test http-protocol-reader-post
+  (let ((req (with-input-from-string
+                 (s (format nil "POST /authors HTTP/1.1
+Host: juergenbickert.de
+Content-Length: 34
+name=Alan+Perlis&commit=Add+Author"))
+               (http-protocol-reader s))))
+    (loop for (left right) in '((:method  "POST")
+                                (:url "/authors")
+                                (:version "1.1")
+                                (:content-length 34)
+                                ("Host" "juergenbickert.de"))
+       do (is (equal right
+                     (cdr (assoc left req :test #'equal)))))
+    (let ((params (cdr (assoc :params req))))
+      (is (string= "Alan Perlis" (cdr (assoc "name" params :test #'string=))))
+      (is (string= "Add Author" (cdr (assoc "commit" params :test #'string=)))))))
 
 (test url-parsing
   (let* ((parsed-url (parse-url "/?john=doe"))
