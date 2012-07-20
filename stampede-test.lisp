@@ -7,36 +7,46 @@
 
 (test creating-closing-server
   (finishes
-    (let ((server (create-server "127.0.0.1" 8080
+    (let ((server (create-server 8080
                                  (lambda (stream)
                                    (declare (ignore stream))))))
-      (shutdown-server server)
-      (sleep 0.002) ; wait for server to shutdown
-      (signals connection-refused-error
-        (with-client-socket (socket stream "127.0.0.1" 8080)
-          (declare (ignore stream))))
-      (let ((server (create-server "127.0.0.1" 8080
+      (unwind-protect
+           (progn
+             (shutdown-server server)
+             (sleep 0.002)              ; wait for server to shutdown
+             (signals connection-refused-error
+               (with-client-socket (socket stream "127.0.0.1" 8080)
+                 (declare (ignore stream)))))
+        (shutdown-server server))
+      (let ((server (create-server 8080
                                    (lambda (stream)
                                      (declare (ignore stream))))))
-        (shutdown-server server)
-        (sleep 0.002) ; wait for server to shutdown
-        (signals connection-refused-error
-          (with-client-socket (socket stream "127.0.0.1" 8080)
-            (declare (ignore stream))))))))
+        (unwind-protect
+             (progn
+               (shutdown-server server)
+               (sleep 0.002)            ; wait for server to shutdown
+               (signals connection-refused-error
+                 (with-client-socket (socket stream "127.0.0.1" 8080)
+                   (declare (ignore stream))))
+               (shutdown-server server))
+          (shutdown-server server))))))
 
 (test connecting-to-server
   (finishes
     (let* (answer
-           (server (create-server "127.0.0.1" 8080
+           (server (create-server 8080
                                   (lambda (stream)
                                     (setf answer (read-line stream))))))
-      (with-client-socket (socket stream "127.0.0.1" 8080)
-        (format stream "client says~%")
-        (force-output stream))
-      (sleep 0.002)
-      (is (string= "client says" answer))
-      (shutdown-server server)
-      (sleep 0.002))))
+      (unwind-protect
+           (progn
+             (with-client-socket (socket stream "127.0.0.1" 8080)
+               (format stream "client says~%")
+               (force-output stream))
+             (sleep 0.002)
+             (is (string= "client says" answer))
+             (shutdown-server server)
+             (sleep 0.002))
+        (shutdown-server server)))))
 
 (test http-protocol-reader-get
   (let ((req (with-input-from-string

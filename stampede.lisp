@@ -8,41 +8,47 @@
    :parse-url))
 (in-package :stampede)
 
-(defun create-server (host port handler &key (worker-threads 1))
+(defun create-server (port handler &key (worker-threads 1))
   (let* ((socket (make-socket :connect :passive
                               :address-family :internet
                               :type :stream))
          (channel (make-instance 'unbounded-channel))
-         (thread
-          (progn
-            (bind-address socket +ipv4-unspecified+
-                          :port port
-                          :reuse-address t)
-            (listen-on socket :backlog 5)
-            (bt:make-thread
-             (lambda ()
-               (unwind-protect
-                    (loop
-                       (let ((stream (accept-connection
-                                      socket
-                                      :wait t)))
-                         (send channel stream)))
-                 (close socket))))))
+         (connection-acceptor
+          (create-listener socket channel port))
          (pooled-worker-threads
-          (loop repeat worker-threads
-             collect
-               (bt:make-thread
-                (lambda ()
-                  (loop
-                     (let ((stream (recv channel)))
-                       (unwind-protect
-                            (funcall handler stream)
-                         (close stream)))))))))
+          (create-worker-threads worker-threads handler channel)))
     (lambda ()
-      (ignore-errors
-        (chanl:kill thread)
-        (loop for worker in pooled-worker-threads
-           do (chanl:kill worker))))))
+      (loop for thread in (list* connection-acceptor pooled-worker-threads)
+         do (ignore-errors
+              (bt:destroy-thread thread))))))
+
+(serve-static-file "/stylesheets/design.css")
+(serve-static-folder "/public/blub-this-that.html")
+
+(defun create-worker-threads (amount handler channel)
+  (loop repeat amount
+     collect
+       (bt:make-thread
+        (lambda ()
+          (loop
+             (let ((stream (recv channel)))
+               (unwind-protect
+                    (funcall handler stream)
+                 (close stream))))))))
+
+(defun create-listener (socket channel port)
+  (progn
+    (bind-address socket +ipv4-unspecified+
+                  :port port
+                  :reuse-address t)
+    (listen-on socket :backlog 5)
+    (bt:make-thread
+     (lambda ()
+       (unwind-protect
+            (loop
+               (let ((stream (accept-connection socket :wait t)))
+                 (send channel stream)))
+         (close socket))))))
 
 (defun shutdown-server (server)
   (funcall server))
@@ -63,21 +69,28 @@
             (when params
               (list (cons :params params)))
             (if (string= method "GET")
-                (loop for line = (read-line stream)
-                   until (or (equal "" line)
-                             (equal "" line))
-                   collect (let ((data (split ":" line)))
-                             (cons (first data) (string-trim " " (second data)))))
-                (loop for line = (read-line stream)
-                   when (string= "Content-Length:" (subseq line 0 15))
-                   append (let ((length (parse-integer (subseq line 16))))
-                            (let ((data (make-array length :element-type 'character)))
-                              (read-sequence data stream)
-                              (list (cons :content-length length)
-                                    (cons :params (collect-parameters (string data))))))
-                   until (string= "Content-Length:" (subseq line 0 15))
-                   collect (let ((data (split ":" line)))
-                             (cons (first data) (string-trim " " (second data)))))))))
+                (read-get-request stream)
+                (read-post-request stream)))))
+
+(defun read-post-request (stream)
+  (loop for line = (read-line stream)
+     for (key . value) = (let ((data (split ":" line)))
+                           (cons (first data) (string-trim " " (second data))))
+     when (string= "Content-Length" key)
+     append (let ((length (parse-integer (subseq line 16))))
+              (let ((data (make-array length :element-type 'character)))
+                (read-sequence data stream)
+                (list (cons :content-length length)
+                      (cons :params (collect-parameters (string data))))))
+     until (string= "Content-Length" key)
+     collect (cons key value)))
+
+(defun read-get-request (stream)
+  (loop for line = (read-line stream)
+     until (or (string= "" line)
+               (string= "" line))
+     collect (let ((data (split ":" line)))
+               (cons (first data) (string-trim " " (second data))))))
 
 (defun http-protocol-writer (data text stream)
   (format stream "HTTP/~a ~a~c~c" (cdr (assoc :version data)) (cdr (assoc :status data)) #\Return #\Newline)
