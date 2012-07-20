@@ -1,0 +1,5 @@
+graceful shutdown ; would be nice, but it comes to the halting problem
+serve static files
+not modified
+serve static directories
+handle post request
