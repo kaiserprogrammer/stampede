@@ -63,10 +63,9 @@
     (append (list (cons :method method)
                   (cons :url url)
                   (cons :version http-protocol-version))
-            (when params
-              (list (cons :params params)))
             (if (string= method "GET")
-                (read-get-request stream)
+                (list* (cons :params params)
+                       (read-get-request stream))
                 (read-post-request stream)))))
 
 (defun read-post-request (stream)

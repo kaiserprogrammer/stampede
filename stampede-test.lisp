@@ -55,9 +55,12 @@
     (loop for (left right) in '((:method  "GET")
                                 (:url "/url")
                                 (:version "1.0")
+                                (:params nil)
                                 ("blub" "that"))
-       do (is (equal right
-                     (cdr (assoc left req :test #'equal))))))
+       do (progn
+            (is (assoc left req :test #'equal))
+            (is (equal right
+                       (cdr (assoc left req :test #'equal)))))))
   (let ((req (with-input-from-string (s (format nil "GET /url HTTP/1.0~%blub: that~%~%"))
                (http-protocol-reader s))))
     (loop for (left right) in '((:method "GET")
