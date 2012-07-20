@@ -42,7 +42,7 @@
              (with-client-socket (socket stream "127.0.0.1" 8080)
                (format stream "client says~%")
                (force-output stream))
-             (sleep 0.002)
+             (sleep 0.004)
              (is (string= "client says" answer))
              (shutdown-server server)
              (sleep 0.002))
