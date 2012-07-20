@@ -9,5 +9,6 @@
   :description "A dead simple web server"
   :depends-on (:chanl
                :cl-ppcre
-               :usocket)
+               :usocket
+               :iolib)
   :components ((:file "stampede")))
