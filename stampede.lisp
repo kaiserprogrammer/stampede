@@ -22,9 +22,6 @@
          do (ignore-errors
               (bt:destroy-thread thread))))))
 
-(serve-static-file "/stylesheets/design.css")
-(serve-static-folder "/public/blub-this-that.html")
-
 (defun create-worker-threads (amount handler channel)
   (loop repeat amount
      collect
