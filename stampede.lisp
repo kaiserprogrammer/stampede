@@ -1,11 +1,13 @@
 (defpackage :stampede
-  (:use :cl :iolib :cl-ppcre :chanl)
+  (:use :cl :iolib :cl-ppcre :chanl :alexandria)
   (:export
    :shutdown-server
    :create-server
    :http-protocol-reader
    :http-protocol-writer
-   :parse-url))
+   :parse-url
+   :create-http-server
+   :defroute))
 (in-package :stampede)
 
 (defun create-server (port handler &key (worker-threads 1))
@@ -47,8 +49,16 @@
                  (send channel stream)))
          (close socket))))))
 
-(defun shutdown-server (server)
-  (funcall server))
+(defclass http-server ()
+  ((routes :initform (list (list "GET")
+                           (list "POST")
+                           (list "PUT"))
+           :accessor routes)
+   (shutdown-function)))
+
+(defgeneric shutdown-server (server))
+(defmethod shutdown-server ((server http-server))
+  (funcall (slot-value server 'shutdown-function)))
 
 (defun http-protocol-reader (stream)
   (let* ((groups (multiple-value-bind (match groups)
@@ -118,3 +128,56 @@
        for (left right) = (split "=" item)
        collect (cons (urlencode:urldecode left :lenientp t :queryp t)
                      (urlencode:urldecode right :lenientp t :queryp t)))))
+
+(defun create-http-server (port &key (worker-threads 1))
+  (let* ((server (make-instance 'http-server))
+         (shutdown-function
+          (create-server port
+                         (lambda (stream)
+                           (let ((req (http-protocol-reader stream)))
+                             (handler-case
+                                 (let ((res (list (cons :version (cdr (assoc :version req)))
+                                                  (cons :status 200)
+                                                  (cons "Content-Type" "text/html"))))
+                                   (http-protocol-writer res
+                                                         (call-route (routes server) req res)
+                                                         stream))
+                               (t (e)
+                                 (let ((res (list (cons :version (cdr (assoc :version req)))
+                                                  (cons :status 200)
+                                                  (cons "Content-Type" "text/plain"))))
+                                   (http-protocol-writer res
+                                                         (format nil "~w~%~%~a" req e)
+                                                         stream))))))
+                         :worker-threads worker-threads)))
+    (setf (slot-value server 'shutdown-function) shutdown-function)
+    server))
+
+(defun call-route (routes req res)
+  (declare (optimize (debug 3)))
+  (let* ((url (cdr (assoc :url req)))
+         (method (cdr (assoc :method req))))
+    (loop for route in (cdr (assoc method routes :test #'string=))
+       for (match . groups) = (multiple-value-bind (match groups)
+                                  (scan-to-strings (car route) url)
+                                (cons match groups))
+       when match
+       return (progn
+                (when (not (alexandria:emptyp groups))
+                  (loop for value across (the simple-vector groups)
+                     for key in (cadr route)
+                     do (push (cons key value) (cdr (assoc :params req)))))
+                (funcall (the function (cddr route)) req res)))))
+
+
+(defun defroute (server method reg fun)
+  (let ((regex (regex-replace-all ":[^/]+" reg "([^/$]+)"))
+        (params (extract-params-from-regex reg)))
+    (let ((item (cons regex (cons params fun))))
+      (push item (cdr (assoc method (routes server) :test #'string=))))))
+
+(defun extract-params-from-regex (reg)
+  (let (params)
+    (do-register-groups (param) ("/:([^/$]+)" reg)
+      (push (make-keyword (string-upcase param)) params))
+    (nreverse params)))
