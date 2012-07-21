@@ -88,18 +88,37 @@ name=Alan+Perlis&commit=Add+Author"))
       (is (string= "Alan Perlis" (cdr (assoc "name" params :test #'string=))))
       (is (string= "Add Author" (cdr (assoc "commit" params :test #'string=)))))))
 
+(test http-protocol-reader-put
+  (let ((req (with-input-from-string
+                 (s (format nil "POST /authors HTTP/1.1
+Host: juergenbickert.de
+Content-Length: 46
+name=Alan+Perlis&commit=Add+Author&_method=put"))
+               (http-protocol-reader s))))
+    (loop for (left right) in '((:method  "PUT")
+                                (:url "/authors")
+                                (:version "1.1")
+                                (:content-length 46)
+                                ("Host" "juergenbickert.de"))
+       do (is (equal right
+                     (cdr (assoc left req :test #'equal)))))
+    (let ((params (cdr (assoc :params req))))
+      (is (string= "Alan Perlis" (cdr (assoc "name" params :test #'string=))))
+      (is (string= "Add Author" (cdr (assoc "commit" params :test #'string=)))))))
+
 (test url-parsing
   (let* ((parsed-url (parse-url "/?john=doe"))
         (url (elt parsed-url 0))
          (params (elt parsed-url 1)))
     (is (equal "/" url))
     (is (equal "doe" (cdr (assoc "john" params :test #'equal)))))
-  (let* ((parsed-url (parse-url "/blub/this/that?john=doe&jonny=depp"))
+  (let* ((parsed-url (parse-url "/blub/this/that?john=doe&jonny=depp&encoded=%2F"))
         (url (elt parsed-url 0))
          (params (elt parsed-url 1)))
     (is (equal "/blub/this/that" url))
     (is (equal "doe" (cdr (assoc "john" params :test #'equal))))
-    (is (equal "depp" (cdr (assoc "jonny" params :test #'equal))))))
+    (is (equal "depp" (cdr (assoc "jonny" params :test #'equal))))
+    (is (equal "/" (cdr (assoc "encoded" params :test #'string=))))))
 
 (test query-parsing
   (let ((params
@@ -113,15 +132,20 @@ name=Alan+Perlis&commit=Add+Author"))
 (test http-protocol-writer
   (is (equal
        "HTTP/1.1 200
+Location: /path/to/
 Content-Type: text/html; charset=utf-8
 
 blub"
        (with-output-to-string (s)
          (http-protocol-writer
-          '((:status . 200)
+          '(("Location" . "/path/to/")
+            (:status . 200)
             (:version . "1.1")
             ("Content-Type" . "text/html; charset=utf-8"))
           "blub"
           s)))))
+
+(test url-decoding
+  (is (string= "http://www.test.org/John%202.jpg" (urlencode:urldecode "http%3A%2F%2Fwww.test.org%2FJohn%25202.jpg"))))
 
 (run!)

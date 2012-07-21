@@ -60,8 +60,7 @@
          (url (elt parsed-url 0))
          (params (elt parsed-url 1))
          (http-protocol-version (svref groups 3)))
-    (append (list (cons :method method)
-                  (cons :url url)
+    (append (list (cons :url url)
                   (cons :version http-protocol-version))
             (if (string= method "GET")
                 (list* (cons :params params)
@@ -69,24 +68,30 @@
                 (read-post-request stream)))))
 
 (defun read-post-request (stream)
-  (loop for line = (read-line stream)
-     for (key . value) = (let ((data (split ":" line)))
-                           (cons (first data) (string-trim " " (second data))))
-     when (string= "Content-Length" key)
-     append (let ((length (parse-integer (subseq line 16))))
-              (let ((data (make-array length :element-type 'character)))
-                (read-sequence data stream)
-                (list (cons :content-length length)
-                      (cons :params (collect-parameters (string data))))))
-     until (string= "Content-Length" key)
-     collect (cons key value)))
+  (let ((req
+         (loop for line = (read-line stream)
+            for (key . value) = (let ((data (split ":" line)))
+                                  (cons (first data) (string-trim " " (second data))))
+            when (string= "Content-Length" key)
+            append (let ((length (parse-integer (subseq line 16))))
+                     (let ((data (make-array length :element-type 'character)))
+                       (read-sequence data stream)
+                       (list (cons :content-length length)
+                             (cons :params (collect-parameters (string data))))))
+            until (string= "Content-Length" key)
+            collect (cons key value))))
+    (cons (cons :method (string-upcase
+                         (or (cdr (assoc "_method" (cdr (assoc :params req)) :test #'string=))
+                             "POST")))
+          req)))
 
 (defun read-get-request (stream)
-  (loop for line = (read-line stream)
-     until (or (string= "" line)
-               (string= "" line))
-     collect (let ((data (split ":" line)))
-               (cons (first data) (string-trim " " (second data))))))
+  (cons (cons :method "GET")
+        (loop for line = (read-line stream)
+           until (or (string= "" line)
+                     (string= "" line))
+           collect (let ((data (split ":" line)))
+                     (cons (first data) (string-trim " " (second data)))))))
 
 (defun http-protocol-writer (data text stream)
   (format stream "HTTP/~a ~a~c~c" (cdr (assoc :version data)) (cdr (assoc :status data)) #\Return #\Newline)
@@ -108,7 +113,8 @@
      (collect-parameters query))))
 
 (defun collect-parameters (query)
-  (let ((items (split "&" (substitute #\  #\+  query))))
+  (let ((items (split "&" query)))
     (loop for item in items
        for (left right) = (split "=" item)
-       collect (cons left right))))
+       collect (cons (urlencode:urldecode left :lenientp t :queryp t)
+                     (urlencode:urldecode right :lenientp t :queryp t)))))
