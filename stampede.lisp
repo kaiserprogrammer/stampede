@@ -87,6 +87,7 @@
             when (string= "Content-Length" key)
             append (let ((length (parse-integer (subseq line 16))))
                      (let ((data (make-array length :element-type 'character)))
+                       (read-line stream)
                        (read-sequence data stream)
                        (list (cons :content-length length)
                              (cons :params (collect-parameters (string data))))))
@@ -156,7 +157,6 @@
     server))
 
 (defun call-route (routes req res)
-  (declare (optimize (debug 3)))
   (let* ((url (cdr (assoc :url req)))
          (method (cdr (assoc :method req))))
     (loop for route in (cdr (assoc method routes :test #'string=))
