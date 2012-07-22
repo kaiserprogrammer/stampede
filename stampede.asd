@@ -10,5 +10,6 @@
   :depends-on (:chanl
                :cl-ppcre
                :usocket
-               :iolib)
+               :iolib
+               :do-urlencode)
   :components ((:file "stampede")))
