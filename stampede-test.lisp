@@ -75,6 +75,7 @@
                  (s (format nil "POST /authors HTTP/1.1
 Host: juergenbickert.de
 Content-Length: 34
+
 name=Alan+Perlis&commit=Add+Author"))
                (http-protocol-reader s))))
     (loop for (left right) in '((:method  "POST")
@@ -93,6 +94,7 @@ name=Alan+Perlis&commit=Add+Author"))
                  (s (format nil "POST /authors HTTP/1.1
 Host: juergenbickert.de
 Content-Length: 46
+
 name=Alan+Perlis&commit=Add+Author&_method=put"))
                (http-protocol-reader s))))
     (loop for (left right) in '((:method  "PUT")
