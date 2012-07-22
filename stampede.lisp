@@ -59,6 +59,8 @@
 (defgeneric shutdown-server (server))
 (defmethod shutdown-server ((server http-server))
   (funcall (slot-value server 'shutdown-function)))
+(defmethod shutdown-server ((server t))
+  (funcall server))
 
 (defun http-protocol-reader (stream)
   (let* ((groups (multiple-value-bind (match groups)
