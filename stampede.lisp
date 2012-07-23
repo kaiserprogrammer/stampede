@@ -31,9 +31,10 @@
         (lambda ()
           (loop
              (let ((stream (recv channel)))
-               (unwind-protect
-                    (ignore-errors (funcall handler stream))
-                 (close stream))))))))
+               (ignore-errors
+                 (unwind-protect
+                      (funcall handler stream)
+                   (close stream)))))))))
 
 (defun create-listener (socket channel port)
   (progn
