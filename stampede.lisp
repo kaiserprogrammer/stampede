@@ -175,11 +175,20 @@
 (defun defroute (server method reg fun)
   (let ((regex (regex-replace-all ":[^/]+" reg "([^/$]+)"))
         (params (extract-params-from-regex reg)))
-    (let ((item (cons regex (cons params fun))))
-      (push item (cdr (assoc method (routes server) :test #'string=))))))
+    (let ((exists (assoc regex
+                         (cdr (assoc method (routes server) :test #'string=))
+                         :test #'string=)))
+      (if exists
+          (progn
+            (setf (car exists) regex)
+            (setf (cadr exists) params)
+            (setf (cddr exists) fun))
+          (let ((item (cons regex (cons params fun))))
+            (push item (cdr (assoc method (routes server) :test #'string=))))))))
 
 (defun extract-params-from-regex (reg)
   (let (params)
     (do-register-groups (param) ("/:([^/$]+)" reg)
       (push (make-keyword (string-upcase param)) params))
     (nreverse params)))
+
