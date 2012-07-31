@@ -13,7 +13,8 @@
 (defun create-server (port handler &key (worker-threads 1))
   (let* ((socket (make-socket :connect :passive
                               :address-family :internet
-                              :type :stream))
+                              :type :stream
+                              :external-format :latin1))
          (channel (make-instance 'unbounded-channel))
          (connection-acceptor
           (create-listener socket channel port))
@@ -138,7 +139,9 @@
          (shutdown-function
           (create-server port
                          (lambda (stream)
-                           (let ((req (http-protocol-reader stream)))
+                           (let ((req (cons (cons :remote-port (iolib:remote-port stream))
+                                            (cons (cons :remote-host (iolib:remote-host stream))
+                                                  (http-protocol-reader stream)))))
                              (handler-case
                                  (let ((res (list (cons :version (cdr (assoc :version req)))
                                                   (cons :status 200)
