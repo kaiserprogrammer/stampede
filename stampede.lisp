@@ -8,7 +8,9 @@
    :parse-url
    :create-http-server
    :defroute
-   :write-headers))
+   :write-headers
+   :set-response-written
+   :write-response))
 (in-package :stampede)
 
 (defun create-server (port handler &key (worker-threads 1))
@@ -126,6 +128,10 @@
 
 (defun write-response (text stream)
   (write-string text stream))
+
+(defun set-response-written (data)
+  (swhen (assoc :response-written data)
+    (setf (cdr it) t)))
 
 (defun http-protocol-writer (data text stream)
   (unless (assoc-value data :headers-written)
