@@ -1,5 +1,5 @@
 (defpackage :stampede
-  (:use :cl :iolib :cl-ppcre :chanl :alexandria)
+  (:use :cl :iolib :cl-ppcre :chanl :alexandria :anaphora)
   (:export
    :shutdown-server
    :create-server
@@ -7,7 +7,8 @@
    :http-protocol-writer
    :parse-url
    :create-http-server
-   :defroute))
+   :defroute
+   :write-headers))
 (in-package :stampede)
 
 (defun create-server (port handler &key (worker-threads 1))
@@ -108,15 +109,29 @@
            collect (let ((data (split ":" line)))
                      (cons (first data) (string-trim " " (second data)))))))
 
+(defun write-headers (data)
+  (anaphora:swhen (assoc :headers-written data)
+    (setf (cdr anaphora:it) t))
+  (let ((stream (assoc-value data :stream)))
+    (format stream "HTTP/~a ~a~c~c" (cdr (assoc :version data)) (cdr (assoc :status data)) #\Return #\Newline)
+    (loop for pair in data
+       when (not
+             (or (eql :version (car pair))
+                 (eql :status (car pair))
+                 (eql :headers-written (car pair))
+                 (eql :response-written (car pair))
+                 (eql :stream (car pair))))
+       do (format stream "~a: ~a~c~c" (car pair) (cdr pair) #\Return #\Newline))
+    (format stream "~c~c" #\Return #\Newline)))
+
+(defun write-response (text stream)
+  (write-string text stream))
+
 (defun http-protocol-writer (data text stream)
-  (format stream "HTTP/~a ~a~c~c" (cdr (assoc :version data)) (cdr (assoc :status data)) #\Return #\Newline)
-  (loop for pair in data
-     when (not
-           (or (equal :version (car pair))
-               (equal :status (car pair))))
-     do (format stream "~a: ~a~c~c" (car pair) (cdr pair) #\Return #\Newline))
-  (format stream "~c~c" #\Return #\Newline)
-  (format stream "~a" text))
+  (unless (assoc-value data :headers-written)
+    (write-headers data))
+  (unless (assoc-value data :response-written)
+    (write-response text stream)))
 
 (defun parse-url (url)
   (let* ((splitted-url (split "\\?" url))
@@ -139,23 +154,24 @@
          (shutdown-function
           (create-server port
                          (lambda (stream)
-                           (let ((req (cons (cons :remote-port (iolib:remote-port stream))
-                                            (cons (cons :remote-host (iolib:remote-host stream))
-                                                  (http-protocol-reader stream)))))
+                           (let* ((req (list* (cons :remote-port (iolib:remote-port stream))
+                                              (cons :remote-host (iolib:remote-host stream))
+                                              (http-protocol-reader stream)))
+                                  (res (list (cons :headers-written nil)
+                                             (cons :response-written nil)
+                                             (cons :stream stream)
+                                             (cons :version (cdr (assoc :version req)))
+                                             (cons :status 200)
+                                             (cons "Content-Type" "text/html"))))
                              (handler-case
-                                 (let ((res (list (cons :version (cdr (assoc :version req)))
-                                                  (cons :status 200)
-                                                  (cons "Content-Type" "text/html"))))
-                                   (http-protocol-writer res
-                                                         (call-route (routes server) req res)
-                                                         stream))
+                                 (http-protocol-writer res
+                                                       (call-route (routes server) req res)
+                                                       stream)
                                (t (e)
-                                 (let ((res (list (cons :version (cdr (assoc :version req)))
-                                                  (cons :status 200)
-                                                  (cons "Content-Type" "text/plain"))))
-                                   (http-protocol-writer res
-                                                         (format nil "~w~%~%~a" req e)
-                                                         stream))))))
+                                 (setf (cdr (assoc "Content-Type" res :test #'string=)) "text/plain")
+                                 (http-protocol-writer res
+                                                       (format nil "~w~%~%~w~%~a~%" req res e)
+                                                       stream)))))
                          :worker-threads worker-threads)))
     (setf (slot-value server 'shutdown-function) shutdown-function)
     server))

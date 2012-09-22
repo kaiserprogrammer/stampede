@@ -11,5 +11,7 @@
                :cl-ppcre
                :usocket
                :iolib
-               :do-urlencode)
+               :do-urlencode
+               :alexandria
+               :anaphora)
   :components ((:file "stampede")))
