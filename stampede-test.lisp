@@ -140,9 +140,10 @@ Content-Type: text/html; charset=utf-8
 blub"
        (with-output-to-string (s)
          (http-protocol-writer
-          '(("Location" . "/path/to/")
+          `(("Location" . "/path/to/")
             (:status . 200)
             (:version . "1.1")
+            (:stream . ,s)
             ("Content-Type" . "text/html; charset=utf-8"))
           "blub"
           s)))))
