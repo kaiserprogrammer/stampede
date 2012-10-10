@@ -166,6 +166,9 @@
                                              (cons :stream stream)
                                              (cons :version (cdr (assoc :version req)))
                                              (cons :status 200)
+                                             (cons "Date"
+                                                   (local-time:to-rfc1123-timestring
+                                                    (local-time:now)))
                                              (cons "Content-Type" "text/html"))))
                              (handler-case
                                  (http-protocol-writer res

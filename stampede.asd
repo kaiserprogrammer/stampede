@@ -13,5 +13,6 @@
                :iolib
                :do-urlencode
                :alexandria
-               :anaphora)
+               :anaphora
+               :local-time)
   :components ((:file "stampede")))
