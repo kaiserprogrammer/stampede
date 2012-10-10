@@ -55,9 +55,7 @@
          (close socket))))))
 
 (defclass http-server ()
-  ((routes :initform (list (list "GET")
-                           (list "POST")
-                           (list "PUT"))
+  ((routes :initform (list (list "GET"))
            :accessor routes)
    (shutdown-function)))
 
@@ -199,6 +197,7 @@
 
 
 (defun defroute (server method reg fun)
+  (add-routing-method server method)
   (let ((regex (regex-replace-all ":[^/]+" reg "([^/$]+)"))
         (params (extract-params-from-regex reg)))
     (let ((exists (assoc regex
@@ -211,6 +210,10 @@
             (setf (cddr exists) fun))
           (let ((item (cons regex (cons params fun))))
             (push item (cdr (assoc method (routes server) :test #'string=))))))))
+
+(defun add-routing-method (server method)
+  (unless (assoc method (routes server) :test 'equal)
+    (nconc (routes server) (list (list method)))))
 
 (defun extract-params-from-regex (reg)
   (let (params)
