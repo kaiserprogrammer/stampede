@@ -198,7 +198,7 @@
 
 (defun defroute (server method reg fun)
   (add-routing-method server method)
-  (let ((regex (regex-replace-all ":[^/]+" reg "([^/$]+)"))
+  (let ((regex (regex-replace-all ":\\w+" reg "([^/$]+?)"))
         (params (extract-params-from-regex reg)))
     (let ((exists (assoc regex
                          (cdr (assoc method (routes server) :test #'string=))
@@ -217,7 +217,6 @@
 
 (defun extract-params-from-regex (reg)
   (let (params)
-    (do-register-groups (param) ("/:([^/$]+)" reg)
+    (do-register-groups (param) (":(\\w+)" reg)
       (push (make-keyword (string-upcase param)) params))
     (nreverse params)))
-
