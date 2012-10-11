@@ -85,7 +85,7 @@
 (defun read-post-request (stream)
   (let ((req
          (loop for line = (read-line stream)
-            for (key . value) = (let ((data (split ":" line)))
+            for (key . value) = (let ((data (split ":" line :limit 2)))
                                   (cons (first data) (string-trim " " (second data))))
             when (string= "Content-Length" key)
             append (let ((length (parse-integer (subseq line 16))))
@@ -106,7 +106,7 @@
         (loop for line = (read-line stream)
            until (or (string= "" line)
                      (string= "" line))
-           collect (let ((data (split ":" line)))
+           collect (let ((data (split ":" line :limit 2)))
                      (cons (first data) (string-trim " " (second data)))))))
 
 (defun write-headers (data)
