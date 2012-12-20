@@ -45,7 +45,7 @@
              (sleep 0.004)
              (is (string= "client says" answer))
              (shutdown-server server)
-             (sleep 0.002))
+             (sleep 0.004))
         (shutdown-server server)))))
 
 (test http-protocol-reader-get
