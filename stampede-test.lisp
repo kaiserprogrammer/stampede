@@ -7,9 +7,9 @@
 
 (test creating-closing-server
   (finishes
-    (let ((server (create-server 8080
-                                 (lambda (stream)
-                                   (declare (ignore stream))))))
+    (let ((server (run-server 8080
+                              (lambda (stream)
+                                (declare (ignore stream))))))
       (unwind-protect
            (progn
              (shutdown-server server)
@@ -18,9 +18,9 @@
                (with-client-socket (socket stream "127.0.0.1" 8080)
                  (declare (ignore stream)))))
         (shutdown-server server))
-      (let ((server (create-server 8080
-                                   (lambda (stream)
-                                     (declare (ignore stream))))))
+      (let ((server (run-server 8080
+                                (lambda (stream)
+                                  (declare (ignore stream))))))
         (unwind-protect
              (progn
                (shutdown-server server)
@@ -34,9 +34,9 @@
 (test connecting-to-server
   (finishes
     (let* (answer
-           (server (create-server 8080
-                                  (lambda (stream)
-                                    (setf answer (read-line stream))))))
+           (server (run-server 8080
+                               (lambda (stream)
+                                 (setf answer (read-line stream))))))
       (unwind-protect
            (progn
              (with-client-socket (socket stream "127.0.0.1" 8080)
@@ -64,9 +64,9 @@
   (let ((req (with-input-from-string (s (format nil "GET /url HTTP/1.0~%blub: that~%~%"))
                (http-protocol-reader s))))
     (loop for (left right) in '((:method "GET")
-                                  (:url "/url")
-                                  (:version "1.0")
-                                  ("blub" "that"))
+                                (:url "/url")
+                                (:version "1.0")
+                                ("blub" "that"))
        do (is (equal right
                      (cdr (assoc left req :test #'equal)))))))
 
@@ -110,12 +110,12 @@ name=Alan+Perlis&commit=Add+Author&_method=put"))
 
 (test url-parsing
   (let* ((parsed-url (parse-url "/?john=doe"))
-        (url (elt parsed-url 0))
+         (url (elt parsed-url 0))
          (params (elt parsed-url 1)))
     (is (equal "/" url))
     (is (equal "doe" (cdr (assoc "john" params :test #'equal)))))
   (let* ((parsed-url (parse-url "/blub/this/that?john=doe&jonny=depp&encoded=%2F"))
-        (url (elt parsed-url 0))
+         (url (elt parsed-url 0))
          (params (elt parsed-url 1)))
     (is (equal "/blub/this/that" url))
     (is (equal "doe" (cdr (assoc "john" params :test #'equal))))

@@ -2,18 +2,22 @@
   (:use :cl :iolib :cl-ppcre :chanl :alexandria :anaphora)
   (:export
    :shutdown-server
-   :create-server
+   :run-server
    :http-protocol-reader
    :http-protocol-writer
    :parse-url
-   :create-http-server
+   :run-http-server
+   :make-http-server
+   :start
+   :stop
+   :running?
    :defroute
    :write-headers
    :set-response-written
    :write-response))
 (in-package :stampede)
 
-(defun create-server (port handler &key (worker-threads 1))
+(defun run-server (port handler &key (worker-threads 1))
   (let* ((socket (make-socket :connect :passive
                               :address-family :internet
                               :type :stream
@@ -57,12 +61,18 @@
 (defclass http-server ()
   ((routes :initform (list (list "GET"))
            :accessor routes)
-   (shutdown-function)))
+   (stop-function)
+   (start-function)
+   (running :initform nil
+            :reader running?)))
 
-(defgeneric shutdown-server (server))
-(defmethod shutdown-server ((server http-server))
-  (funcall (slot-value server 'shutdown-function)))
-(defmethod shutdown-server ((server t))
+(defgeneric stop (server))
+(defmethod stop ((server http-server))
+  (when (slot-value server 'running)
+    (setf (slot-value server 'running) nil)
+    (funcall (slot-value server 'stop-function))))
+
+(defmethod stop ((server t))
   (funcall server))
 
 (defun http-protocol-reader (stream)
@@ -153,35 +163,48 @@
        collect (cons (urlencode:urldecode left :lenientp t :queryp t)
                      (urlencode:urldecode right :lenientp t :queryp t)))))
 
-(defun create-http-server (port &key (worker-threads 1))
+(defun make-http-server (port &key (worker-threads 1))
   (let* ((server (make-instance 'http-server))
-         (shutdown-function
-          (create-server port
-                         (lambda (stream)
-                           (let* ((req (list* (cons :remote-port (iolib:remote-port stream))
-                                              (cons :remote-host (iolib:remote-host stream))
-                                              (http-protocol-reader stream)))
-                                  (res (list (cons :headers-written nil)
-                                             (cons :response-written nil)
-                                             (cons :stream stream)
-                                             (cons :version (cdr (assoc :version req)))
-                                             (cons :status 200)
-                                             (cons "Date"
-                                                   (local-time:to-rfc1123-timestring
-                                                    (local-time:now)))
-                                             (cons "Content-Type" "text/html"))))
-                             (handler-case
-                                 (http-protocol-writer res
-                                                       (call-route (routes server) req res)
-                                                       stream)
-                               (t (e)
-                                 (setf (cdr (assoc "Content-Type" res :test #'string=)) "text/plain")
-                                 (http-protocol-writer res
-                                                       (format nil "~w~%~%~w~%~a~%" req res e)
-                                                       stream)))))
-                         :worker-threads worker-threads)))
-    (setf (slot-value server 'shutdown-function) shutdown-function)
+         (start-function
+          (lambda ()
+            (run-server port
+                        (lambda (stream)
+                          (let* ((req (list* (cons :remote-port (iolib:remote-port stream))
+                                             (cons :remote-host (iolib:remote-host stream))
+                                             (http-protocol-reader stream)))
+                                 (res (list (cons :headers-written nil)
+                                            (cons :response-written nil)
+                                            (cons :stream stream)
+                                            (cons :version (cdr (assoc :version req)))
+                                            (cons :status 200)
+                                            (cons "Date"
+                                                  (local-time:to-rfc1123-timestring
+                                                   (local-time:now)))
+                                            (cons "Content-Type" "text/html"))))
+                            (handler-case
+                                (http-protocol-writer res
+                                                      (call-route (routes server) req res)
+                                                      stream)
+                              (t (e)
+                                (setf (cdr (assoc "Content-Type" res :test #'string=)) "text/plain")
+                                (http-protocol-writer res
+                                                      (format nil "~w~%~%~w~%~a~%" req res e)
+                                                      stream)))))
+                        :worker-threads worker-threads))))
+    (setf (slot-value server 'start-function) start-function)
     server))
+
+(defun run-http-server (port &key (worker-threads 1))
+  (let ((server (make-http-server port :worker-threads worker-threads)))
+    (start server)))
+
+(defmethod start ((server http-server))
+  (unless (running? server)
+    (let ((stop-function
+           (funcall (slot-value server 'start-function))))
+      (setf (slot-value server 'running) t)
+      (setf (slot-value server 'stop-function) stop-function)))
+  server)
 
 (defun call-route (routes req res)
   (let* ((url (cdr (assoc :url req)))
