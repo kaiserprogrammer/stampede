@@ -93,19 +93,19 @@
                 (read-post-request stream)))))
 
 (defun read-post-request (stream)
-  (let ((req
-         (loop for line = (read-line stream)
-            for (key . value) = (let ((data (split ":" line :limit 2)))
-                                  (cons (first data) (string-trim " " (second data))))
-            when (string= "Content-Length" key)
-            append (let ((length (parse-integer (subseq line 16))))
-                     (let ((data (make-array length :element-type 'character)))
-                       (read-line stream)
+  (let* ((length nil)
+         (req
+          (loop for line = (read-line stream)
+             when (string= line "")
+             collect (let ((data (make-array length :element-type 'character)))
                        (read-sequence data stream)
-                       (list (cons :content-length length)
-                             (cons :params (collect-parameters (string data))))))
-            until (string= "Content-Length" key)
-            collect (cons key value))))
+                       (cons :params (collect-parameters (string data))))
+             until (string= "" line)
+             collect (let ((data (split ":" line :limit 2)))
+                       (if (string= "Content-Length" (first data))
+                           (progn (setf length (parse-integer (subseq line 16)))
+                                  (cons :content-length length))
+                           (cons (first data) (string-trim " " (second data))))))))
     (cons (cons :method (string-upcase
                          (or (cdr (assoc "_method" (cdr (assoc :params req)) :test #'string=))
                              "POST")))
