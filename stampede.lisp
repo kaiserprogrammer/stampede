@@ -75,9 +75,15 @@
 (defmethod stop ((server t))
   (funcall server))
 
+(defun my-read-line (stream)
+  (with-output-to-string (str)
+    (loop for byte = (read-byte stream nil nil)
+       while (and byte (not (= byte 10)))
+       do (write-char (code-char byte) str))))
+
 (defun http-protocol-reader (stream)
   (let* ((groups (multiple-value-bind (match groups)
-                     (scan-to-strings "(\\w+) (\\S+) (\\w+)/(\\S+)" (read-line stream))
+                     (scan-to-strings "(\\w+) (\\S+) (\\w+)/(\\S+)" (my-read-line stream))
                    (declare (ignore match))
                    groups))
          (method (svref groups 0))
@@ -95,11 +101,11 @@
 (defun read-post-request (stream)
   (let* ((length nil)
          (req
-          (loop for line = (read-line stream)
+          (loop for line = (my-read-line stream)
              when (string= line "")
-             collect (let ((data (make-array length :element-type 'character)))
+             collect (let ((data (make-array length :element-type '(unsigned-byte 8))))
                        (read-sequence data stream)
-                       (cons :params (collect-parameters (string data))))
+                       (cons :params (collect-parameters (sb-ext:octets-to-string data))))
              until (string= "" line)
              collect (let ((data (split ":" line :limit 2)))
                        (if (string= "Content-Length" (first data))
@@ -113,7 +119,7 @@
 
 (defun read-get-request (stream)
   (cons (cons :method "GET")
-        (loop for line = (read-line stream)
+        (loop for line = (my-read-line stream)
            until (or (string= "" line)
                      (string= "" line))
            collect (let ((data (split ":" line :limit 2)))
@@ -123,7 +129,7 @@
   (anaphora:swhen (assoc :headers-written data)
     (setf (cdr anaphora:it) t))
   (let ((stream (assoc-value data :stream)))
-    (format stream "HTTP/~a ~a~c~c" (cdr (assoc :version data)) (cdr (assoc :status data)) #\Return #\Newline)
+    (write-sequence (sb-ext:string-to-octets (format nil "HTTP/~a ~a~c~c" (cdr (assoc :version data)) (cdr (assoc :status data)) #\Return #\Newline)) stream)
     (loop for pair in data
        when (not
              (or (eql :version (car pair))
@@ -131,11 +137,12 @@
                  (eql :headers-written (car pair))
                  (eql :response-written (car pair))
                  (eql :stream (car pair))))
-       do (format stream "~a: ~a~c~c" (car pair) (cdr pair) #\Return #\Newline))
-    (format stream "~c~c" #\Return #\Newline)))
+       do (write-sequence (sb-ext:string-to-octets (format nil "~a: ~a~c~c" (car pair) (cdr pair) #\Return #\Newline)) stream))
+    (write-sequence (sb-ext:string-to-octets (format nil "~c~c" #\Return #\Newline)) stream)))
 
 (defun write-response (text stream)
-  (write-string text stream))
+  (let ((text (princ-to-string text)))
+    (write-sequence (sb-ext:string-to-octets text) stream)))
 
 (defun set-response-written (data)
   (swhen (assoc :response-written data)
@@ -169,27 +176,36 @@
           (lambda ()
             (run-server port
                         (lambda (stream)
-                          (let* ((req (list* (cons :remote-port (iolib:remote-port stream))
-                                             (cons :remote-host (iolib:remote-host stream))
-                                             (http-protocol-reader stream)))
-                                 (res (list (cons :headers-written nil)
-                                            (cons :response-written nil)
-                                            (cons :stream stream)
-                                            (cons :version (cdr (assoc :version req)))
-                                            (cons :status 200)
-                                            (cons "Date"
-                                                  (local-time:to-rfc1123-timestring
-                                                   (local-time:now)))
-                                            (cons "Content-Type" "text/html"))))
-                            (handler-case
-                                (http-protocol-writer res
-                                                      (call-route (routes server) req res)
-                                                      stream)
-                              (t (e)
-                                (setf (cdr (assoc "Content-Type" res :test #'string=)) "text/plain")
-                                (http-protocol-writer res
-                                                      (format nil "~w~%~%~w~%~a~%" req res e)
-                                                      stream)))))
+                          (unwind-protect
+                               (let ((ssl-stream (cl+ssl:make-ssl-server-stream (fd-of stream)
+                                                                                :certificate "/home/coder/stampede.crt"
+                                                                                :key "/home/coder/stampede.key"
+                                                                                :unwrap-stream-p nil)))
+
+                                 (unwind-protect
+                                      (let* ((req (list* (cons :remote-port (iolib:remote-port stream))
+                                                         (cons :remote-host (iolib:remote-host stream))
+                                                         (http-protocol-reader ssl-stream)))
+                                             (res (list (cons :headers-written nil)
+                                                        (cons :response-written nil)
+                                                        (cons :stream ssl-stream)
+                                                        (cons :version (cdr (assoc :version req)))
+                                                        (cons :status 200)
+                                                        (cons "Date"
+                                                              (local-time:to-rfc1123-timestring
+                                                               (local-time:now)))
+                                                        (cons "Content-Type" "text/html"))))
+                                        (handler-case
+                                            (http-protocol-writer res
+                                                                  (call-route (routes server) req res)
+                                                                  ssl-stream)
+                                          (t (e)
+                                            (setf (cdr (assoc "Content-Type" res :test #'string=)) "text/plain")
+                                            (http-protocol-writer res
+                                                                  (format nil "~w~%~%~w~%~a~%" req res e)
+                                                                  ssl-stream))))
+                                   (close ssl-stream)))
+                            (close stream)))
                         :worker-threads worker-threads))))
     (setf (slot-value server 'start-function) start-function)
     server))
