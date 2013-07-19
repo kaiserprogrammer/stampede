@@ -76,16 +76,24 @@
   (funcall server))
 
 (defun my-read-line (stream)
-  (with-output-to-string (str)
-    (loop for byte = (read-byte stream nil nil)
-       while (and byte (not (= byte 10)))
-       do (write-char (code-char byte) str))))
+  (bt:with-timeout (1)
+    (with-output-to-string (str)
+      (loop for byte = (read-byte stream nil nil)
+         while byte
+         when (= byte 13)
+         do (progn (read-byte stream)
+                   (return))
+         do (write-char (code-char byte) str)))))
 
 (defun http-protocol-reader (stream)
-  (let* ((groups (multiple-value-bind (match groups)
-                     (scan-to-strings "(\\w+) (\\S+) (\\w+)/(\\S+)" (my-read-line stream))
+  (let* ((read (do ((read (my-read-line stream) (my-read-line stream)))
+                   ((> (length read) 0) read)))
+         (groups (multiple-value-bind (match groups)
+                     (scan-to-strings "(\\w+) (\\S+) (\\w+)/(\\S+)" read)
                    (declare (ignore match))
-                   groups))
+                   (if groups
+                       groups
+                       (error 'simple-error))))
          (method (svref groups 0))
          (parsed-url (parse-url (svref groups 1)))
          (url (elt parsed-url 0))
@@ -102,16 +110,16 @@
   (let* ((length nil)
          (req
           (loop for line = (my-read-line stream)
-             when (string= line "")
+             when (string= line "")
              collect (let ((data (make-array length :element-type '(unsigned-byte 8))))
                        (read-sequence data stream)
                        (cons :params (collect-parameters (sb-ext:octets-to-string data))))
-             until (string= "" line)
+             until (string= "" line)
              collect (let ((data (split ":" line :limit 2)))
                        (if (string= "Content-Length" (first data))
                            (progn (setf length (parse-integer (subseq line 16)))
                                   (cons :content-length length))
-                           (cons (first data) (string-trim " " (second data))))))))
+                           (cons (first data) (string-trim " " (second data))))))))
     (cons (cons :method (string-upcase
                          (or (cdr (assoc "_method" (cdr (assoc :params req)) :test #'string=))
                              "POST")))
@@ -120,10 +128,9 @@
 (defun read-get-request (stream)
   (cons (cons :method "GET")
         (loop for line = (my-read-line stream)
-           until (or (string= "" line)
-                     (string= "" line))
+           until (or (string= "" line))
            collect (let ((data (split ":" line :limit 2)))
-                     (cons (first data) (string-trim " " (second data)))))))
+                     (cons (first data) (string-trim " " (second data)))))))
 
 (defun write-headers (data)
   (anaphora:swhen (assoc :headers-written data)
