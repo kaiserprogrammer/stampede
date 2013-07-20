@@ -1,5 +1,5 @@
 (defpackage :stampede
-  (:use :cl :iolib :cl-ppcre :chanl :alexandria :anaphora)
+  (:use :cl :iolib :cl-ppcre :alexandria :anaphora)
   (:export
    :shutdown-server
    :run-server
@@ -22,7 +22,7 @@
                               :address-family :internet
                               :type :stream
                               :external-format :latin1))
-         (channel (make-instance 'unbounded-channel))
+         (channel (lparallel.queue:make-queue))
          (connection-acceptor
           (create-listener socket channel port))
          (pooled-worker-threads
@@ -38,11 +38,10 @@
        (bt:make-thread
         (lambda ()
           (loop
-             (let ((stream (recv channel)))
-               (ignore-errors
-                 (unwind-protect
-                      (funcall handler stream)
-                   (close stream)))))))))
+             (let ((stream (lparallel.queue:pop-queue channel)))
+               (unwind-protect
+                    (funcall handler stream)
+                 (close stream))))))))
 
 (defun create-listener (socket channel port)
   (progn
@@ -55,7 +54,7 @@
        (unwind-protect
             (loop
                (let ((stream (accept-connection socket :wait t)))
-                 (send channel stream)))
+                 (lparallel.queue:push-queue stream channel)))
          (close socket))))))
 
 (defclass http-server ()
