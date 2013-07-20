@@ -176,43 +176,40 @@
        collect (cons (urlencode:urldecode left :lenientp t :queryp t)
                      (urlencode:urldecode right :lenientp t :queryp t)))))
 
+(defun default-start-function (server port worker-threads)
+  (run-server port
+              (lambda (stream)
+                (let ((ssl-stream stream)
+                      (state "read"))
+                  (unwind-protect
+                       (handler-case
+                           (let* ((req (list* (cons :remote-port (iolib:remote-port stream))
+                                              (cons :remote-host (iolib:remote-host stream))
+                                              (http-protocol-reader ssl-stream)))
+                                  (res (list (cons :headers-written nil)
+                                             (cons :response-written nil)
+                                             (cons :stream ssl-stream)
+                                             (cons :version (cdr (assoc :version req)))
+                                             (cons :status 200)
+                                             (cons "Date"
+                                                   (local-time:to-rfc1123-timestring
+                                                    (local-time:now)))
+                                             (cons "Content-Type" "text/html"))))
+                             (prog2
+                                 (setf state "write")
+                                 (http-protocol-writer res
+                                                       (call-route (routes server) req res)
+                                                       ssl-stream)
+                               (setf state nil)))
+                         (bt:timeout (e) (print e)))
+                    (when state
+                      (print state out)))))
+              :worker-threads worker-threads))
+
 (defun make-http-server (port &key (worker-threads 1))
   (let* ((server (make-instance 'http-server))
          (start-function
-          (lambda ()
-            (run-server port
-                        (lambda (stream)
-                          (unwind-protect
-                               (let ((ssl-stream (cl+ssl:make-ssl-server-stream (fd-of stream)
-                                                                                :certificate "/home/coder/stampede.crt"
-                                                                                :key "/home/coder/stampede.key"
-                                                                                :unwrap-stream-p nil)))
-
-                                 (unwind-protect
-                                      (let* ((req (list* (cons :remote-port (iolib:remote-port stream))
-                                                         (cons :remote-host (iolib:remote-host stream))
-                                                         (http-protocol-reader ssl-stream)))
-                                             (res (list (cons :headers-written nil)
-                                                        (cons :response-written nil)
-                                                        (cons :stream ssl-stream)
-                                                        (cons :version (cdr (assoc :version req)))
-                                                        (cons :status 200)
-                                                        (cons "Date"
-                                                              (local-time:to-rfc1123-timestring
-                                                               (local-time:now)))
-                                                        (cons "Content-Type" "text/html"))))
-                                        (handler-case
-                                            (http-protocol-writer res
-                                                                  (call-route (routes server) req res)
-                                                                  ssl-stream)
-                                          (t (e)
-                                            (setf (cdr (assoc "Content-Type" res :test #'string=)) "text/plain")
-                                            (http-protocol-writer res
-                                                                  (format nil "~w~%~%~w~%~a~%" req res e)
-                                                                  ssl-stream))))
-                                   (close ssl-stream)))
-                            (close stream)))
-                        :worker-threads worker-threads))))
+          (lambda () (default-start-function server port worker-threads))))
     (setf (slot-value server 'start-function) start-function)
     server))
 
