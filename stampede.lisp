@@ -179,8 +179,7 @@
 (defun default-start-function (server port worker-threads)
   (run-server port
               (lambda (stream)
-                (let ((ssl-stream stream)
-                      (state "read"))
+                (let ((ssl-stream stream))
                   (unwind-protect
                        (handler-case
                            (let* ((req (list* (cons :remote-port (iolib:remote-port stream))
@@ -195,15 +194,11 @@
                                                    (local-time:to-rfc1123-timestring
                                                     (local-time:now)))
                                              (cons "Content-Type" "text/html"))))
-                             (prog2
-                                 (setf state "write")
-                                 (http-protocol-writer res
-                                                       (call-route (routes server) req res)
-                                                       ssl-stream)
-                               (setf state nil)))
-                         (bt:timeout (e) (print e)))
-                    (when state
-                      (print state out)))))
+                             (http-protocol-writer res
+                                                   (call-route (routes server) req res)
+                                                   ssl-stream)
+)
+                         (bt:timeout (e) (print e))))))
               :worker-threads worker-threads))
 
 (defun make-http-server (port &key (worker-threads 1))
