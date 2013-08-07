@@ -1,5 +1,5 @@
 (defpackage :stampede
-  (:use :cl :iolib :cl-ppcre :alexandria :anaphora)
+  (:use :cl :cl-ppcre :alexandria :anaphora)
   (:export
    :shutdown-server
    :run-server
@@ -18,44 +18,39 @@
 (in-package :stampede)
 
 (defun run-server (port handler &key (worker-threads 1))
-  (let* ((socket (make-socket :connect :passive
-                              :address-family :internet
-                              :type :stream
-                              :external-format :latin1))
+  (declare (optimize (safety 3)))
+  (let* ((socket (iolib:make-socket :connect :passive
+                                    :address-family :internet
+                                    :type :stream
+                                    :external-format :latin1))
          (channel (lparallel.queue:make-queue))
-         (connection-acceptor
-          (create-listener socket channel port))
          (pooled-worker-threads
-          (create-worker-threads worker-threads handler channel)))
+          (cons (progn
+                  (iolib:bind-address socket iolib:+ipv4-unspecified+
+                                      :port port
+                                      :reuse-address t)
+                  (iolib:listen-on socket :backlog 5)
+                  (bt:make-thread
+                   (lambda ()
+                     (unwind-protect
+                          (loop
+                             (let ((stream (iolib:accept-connection socket :wait t)))
+                               (lparallel.queue:push-queue stream channel)))
+                       (close socket)))))
+                (loop repeat worker-threads
+                   collect
+                     (bt:make-thread
+                      (lambda ()
+                        (loop
+                           (let ((stream (lparallel.queue:pop-queue channel)))
+                             (unwind-protect
+                                  (handler-case (bt:with-timeout (5) (funcall handler stream))
+                                    (bt:timeout (e) e))
+                               (close stream))))))))))
     (lambda ()
-      (loop for thread in (list* connection-acceptor pooled-worker-threads)
-         do (ignore-errors
-              (bt:destroy-thread thread))))))
-
-(defun create-worker-threads (amount handler channel)
-  (loop repeat amount
-     collect
-       (bt:make-thread
-        (lambda ()
-          (loop
-             (let ((stream (lparallel.queue:pop-queue channel)))
-               (unwind-protect
-                    (funcall handler stream)
-                 (close stream))))))))
-
-(defun create-listener (socket channel port)
-  (progn
-    (bind-address socket +ipv4-unspecified+
-                  :port port
-                  :reuse-address t)
-    (listen-on socket :backlog 5)
-    (bt:make-thread
-     (lambda ()
-       (unwind-protect
-            (loop
-               (let ((stream (accept-connection socket :wait t)))
-                 (lparallel.queue:push-queue stream channel)))
-         (close socket))))))
+      (progn (loop for thread in pooled-worker-threads
+                do (ignore-errors
+                     (bt:destroy-thread thread)))))))
 
 (defclass http-server ()
   ((routes :initform (list (list "GET"))
@@ -176,29 +171,37 @@
        collect (cons (urlencode:urldecode left :lenientp t :queryp t)
                      (urlencode:urldecode right :lenientp t :queryp t)))))
 
+(defun process-http (server stream)
+  (let* ((ssl-stream stream)
+         (res (list (cons :headers-written nil)
+                    (cons :response-written nil)
+                    (cons :stream ssl-stream)
+                    (cons :version "1.1")
+                    (cons :status 200)
+                    (cons "Date"
+                          (local-time:to-rfc1123-timestring
+                           (local-time:now)))
+                    (cons "Content-Type" "text/html")))
+         (req (list (cons :remote-port (iolib:remote-port stream))
+                    (cons :remote-host (iolib:remote-host stream)))))
+    (unwind-protect
+         (handler-case
+             (progn
+               (nconc req (http-protocol-reader ssl-stream))
+               (http-protocol-writer res
+                                     (call-route (routes server) req res)
+                                     ssl-stream))
+           (bt:timeout (e) e)
+           (t (e) (setf (cdr (assoc "Content-Type" res :test #'equal)) "text/plain")
+              (http-protocol-writer res (with-output-to-string (*standard-output*)
+                                          (princ e)
+                                          (print req)
+                                          (print res))
+                                    ssl-stream))))))
+
 (defun default-start-function (server port worker-threads)
   (run-server port
-              (lambda (stream)
-                (let ((ssl-stream stream))
-                  (unwind-protect
-                       (handler-case
-                           (let* ((req (list* (cons :remote-port (iolib:remote-port stream))
-                                              (cons :remote-host (iolib:remote-host stream))
-                                              (http-protocol-reader ssl-stream)))
-                                  (res (list (cons :headers-written nil)
-                                             (cons :response-written nil)
-                                             (cons :stream ssl-stream)
-                                             (cons :version (cdr (assoc :version req)))
-                                             (cons :status 200)
-                                             (cons "Date"
-                                                   (local-time:to-rfc1123-timestring
-                                                    (local-time:now)))
-                                             (cons "Content-Type" "text/html"))))
-                             (http-protocol-writer res
-                                                   (call-route (routes server) req res)
-                                                   ssl-stream)
-)
-                         (bt:timeout (e) (print e))))))
+              (alexandria:curry #'process-http server)
               :worker-threads worker-threads))
 
 (defun make-http-server (port &key (worker-threads 1))
