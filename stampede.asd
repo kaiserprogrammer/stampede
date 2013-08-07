@@ -7,12 +7,11 @@
   :author "Jürgen Bickert <juergenbickert@gmail.com>"
   :maintainer "Jürgen Bickert <juergenbickert@gmail.com>"
   :description "A dead simple web server"
-  :depends-on (:chanl
-               :cl-ppcre
-               :usocket
+  :depends-on (:cl-ppcre
                :iolib
                :do-urlencode
                :alexandria
                :anaphora
-               :local-time)
+               :local-time
+               :lparallel)
   :components ((:file "stampede")))
