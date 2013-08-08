@@ -35,24 +35,36 @@
                     (lambda ()
                       (unwind-protect
                            (loop
-                              (let ((stream (iolib:accept-connection socket :wait t)))
-                                (lparallel.queue:push-queue stream channel)))
+                              (ignore-errors
+                                (let ((stream (iolib:accept-connection socket :wait t)))
+                                  (lparallel.queue:push-queue stream channel))))
                         (close socket)))))
                  (bt:make-thread
                   (lambda ()
-                    (loop (let ((stream (lparallel.queue:pop-queue keepalive)))
-                            (if (listen stream)
-                                (lparallel.queue:push-queue stream channel)
-                                (lparallel.queue:push-queue stream keepalive))))))
+                    (loop (ignore-errors
+                            (let ((stream (lparallel.queue:pop-queue keepalive)))
+                              (if (and stream (open-stream-p stream))
+                                  (handler-case (let ((alivep (listen stream)))
+                                                  (if alivep
+                                                      (lparallel.queue:push-queue stream channel)
+                                                      (lparallel.queue:push-queue stream keepalive)))
+                                    (t (e) (declare (ignore e)) (close stream)))
+                                  (close stream)))))))
                  (loop repeat worker-threads
                     collect
                       (bt:make-thread
                        (lambda ()
                          (loop
-                            (let ((stream (lparallel.queue:pop-queue channel)))
-                              (handler-case (bt:with-timeout (5) (funcall handler stream))
-                                (bt:timeout (e) e))
-                              (lparallel.queue:push-queue stream keepalive)))))))))
+                            (ignore-errors
+                              (let ((stream (handler-case (bt:with-timeout (1)
+                                                            (lparallel.queue:pop-queue channel))
+                                              (bt:timeout (e) (declare (ignore e)) nil))))
+                                (when stream
+                                  (handler-case (bt:with-timeout (5)
+                                                  (unless (eq :closed (funcall handler stream))
+                                                    (lparallel.queue:push-queue stream keepalive)))
+                                    (bt:timeout (e) (declare (ignore e)) (close stream))
+                                    (t (e) (declare (ignore e)) (close stream)))))))))))))
     (lambda ()
       (progn (loop for thread in pooled-worker-threads
                 do (ignore-errors
@@ -176,6 +188,7 @@
        for (left right) = (split "=" item)
        collect (cons (urlencode:urldecode left :lenientp t :queryp t)
                      (urlencode:urldecode right :lenientp t :queryp t)))))
+
 (defun process-http (server stream)
   (let* ((ssl-stream stream)
          (res (list (cons :headers-written nil)
@@ -199,7 +212,11 @@
               (http-response ssl-stream (with-output-to-string (*standard-output*)
                                           (princ e)
                                           (print req)
-                                          (print res)) res))))))
+                                          (print res)) res)))
+      (when (or (equal "1.0" (cdr (assoc :version req)))
+                (equal (cdr (assoc "Connection" req :test #'equal)) "close"))
+        (close stream)
+        :closed))))
 
 (defun http-response (stream response res)
   (unless (assoc "Content-Length" res :test #'equal)
