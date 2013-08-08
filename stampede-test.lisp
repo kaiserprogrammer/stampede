@@ -12,24 +12,24 @@
                                 (declare (ignore stream))))))
       (unwind-protect
            (progn
-             (shutdown-server server)
+             (stop server)
              (sleep 0.002)              ; wait for server to shutdown
              (signals connection-refused-error
                (with-client-socket (socket stream "127.0.0.1" 8080)
                  (declare (ignore stream)))))
-        (shutdown-server server))
+        (stop server))
       (let ((server (run-server 8080
                                 (lambda (stream)
                                   (declare (ignore stream))))))
         (unwind-protect
              (progn
-               (shutdown-server server)
+               (stop server)
                (sleep 0.002)            ; wait for server to shutdown
                (signals connection-refused-error
                  (with-client-socket (socket stream "127.0.0.1" 8080)
                    (declare (ignore stream))))
-               (shutdown-server server))
-          (shutdown-server server))))))
+               (stop server))
+          (stop server))))))
 
 (test connecting-to-server
   (finishes
@@ -44,13 +44,13 @@
                (force-output stream))
              (sleep 0.004)
              (is (string= "client says" answer))
-             (shutdown-server server)
+             (stop server)
              (sleep 0.004))
-        (shutdown-server server)))))
+        (stop server)))))
 
 (test http-protocol-reader-get
-  (let ((req (with-input-from-string
-                 (s (format nil "GET /url HTTP/1.0~%blub: that~%~%"))
+  (let ((req (flexi-streams:with-input-from-sequence
+                 (s (flexi-streams:string-to-octets (format nil "GET /url HTTP/1.0~%blub: that~%~%")))
                (http-protocol-reader s))))
     (loop for (left right) in '((:method  "GET")
                                 (:url "/url")
@@ -61,7 +61,7 @@
             (is (assoc left req :test #'equal))
             (is (equal right
                        (cdr (assoc left req :test #'equal)))))))
-  (let ((req (with-input-from-string (s (format nil "GET /url HTTP/1.0~%blub: that~%~%"))
+  (let ((req (flexi-streams:with-input-from-sequence (s (flexi-streams:string-to-octets (format nil "GET /url HTTP/1.0~%blub: that~%~%")))
                (http-protocol-reader s))))
     (loop for (left right) in '((:method "GET")
                                 (:url "/url")
@@ -71,12 +71,12 @@
                      (cdr (assoc left req :test #'equal)))))))
 
 (test http-protocol-reader-post
-  (let ((req (with-input-from-string
-                 (s (format nil "POST /authors HTTP/1.1
+  (let ((req (flexi-streams:with-input-from-sequence
+                 (s (flexi-streams:string-to-octets (format nil "POST /authors HTTP/1.1
 Host: juergenbickert.de
 Content-Length: 34
 
-name=Alan+Perlis&commit=Add+Author"))
+name=Alan+Perlis&commit=Add+Author")))
                (http-protocol-reader s))))
     (loop for (left right) in '((:method  "POST")
                                 (:url "/authors")
@@ -90,12 +90,12 @@ name=Alan+Perlis&commit=Add+Author"))
       (is (string= "Add Author" (cdr (assoc "commit" params :test #'string=)))))))
 
 (test http-protocol-reader-put
-  (let ((req (with-input-from-string
-                 (s (format nil "POST /authors HTTP/1.1
+  (let ((req (flexi-streams:with-input-from-sequence
+                 (s (flexi-streams:string-to-octets (format nil "POST /authors HTTP/1.1
 Host: juergenbickert.de
 Content-Length: 46
 
-name=Alan+Perlis&commit=Add+Author&_method=put"))
+name=Alan+Perlis&commit=Add+Author&_method=put")))
                (http-protocol-reader s))))
     (loop for (left right) in '((:method  "PUT")
                                 (:url "/authors")
@@ -126,7 +126,7 @@ name=Alan+Perlis&commit=Add+Author&_method=put"))
   (let ((params
          (cdr (assoc
                :params
-               (with-input-from-string (s (format nil "GET /?john=doe&jim=beam HTTP/1.0~%~%"))
+               (flexi-streams:with-input-from-sequence (s (flexi-streams:string-to-octets (format nil "GET /?john=doe&jim=beam HTTP/1.0~%~%")))
                  (http-protocol-reader s))))))
     (is (equal "doe" (cdr (assoc "john" params :test #'equal))))
     (is (equal "beam" (cdr (assoc "jim" params :test #'equal))))))
@@ -138,15 +138,16 @@ Location: /path/to/
 Content-Type: text/html; charset=utf-8
 
 blub"
-       (with-output-to-string (s)
-         (http-protocol-writer
-          `(("Location" . "/path/to/")
-            (:status . 200)
-            (:version . "1.1")
-            (:stream . ,s)
-            ("Content-Type" . "text/html; charset=utf-8"))
-          "blub"
-          s)))))
+       (flexi-streams:octets-to-string
+        (flexi-streams:with-output-to-sequence (s)
+          (http-protocol-writer
+           `(("Location" . "/path/to/")
+             (:status . 200)
+             (:version . "1.1")
+             (:stream . ,s)
+             ("Content-Type" . "text/html; charset=utf-8"))
+           "blub"
+           s))))))
 
 (test url-decoding
   (is (string= "http://www.test.org/John%202.jpg" (urlencode:urldecode "http%3A%2F%2Fwww.test.org%2FJohn%25202.jpg"))))
