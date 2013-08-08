@@ -24,29 +24,35 @@
                                     :type :stream
                                     :external-format :latin1))
          (channel (lparallel.queue:make-queue))
+         (keepalive (lparallel.queue:make-queue))
          (pooled-worker-threads
-          (cons (progn
-                  (iolib:bind-address socket iolib:+ipv4-unspecified+
-                                      :port port
-                                      :reuse-address t)
-                  (iolib:listen-on socket :backlog 5)
-                  (bt:make-thread
-                   (lambda ()
-                     (unwind-protect
-                          (loop
-                             (let ((stream (iolib:accept-connection socket :wait t)))
-                               (lparallel.queue:push-queue stream channel)))
-                       (close socket)))))
-                (loop repeat worker-threads
-                   collect
-                     (bt:make-thread
-                      (lambda ()
-                        (loop
-                           (let ((stream (lparallel.queue:pop-queue channel)))
-                             (unwind-protect
-                                  (handler-case (bt:with-timeout (5) (funcall handler stream))
-                                    (bt:timeout (e) e))
-                               (close stream))))))))))
+          (list* (progn
+                   (iolib:bind-address socket iolib:+ipv4-unspecified+
+                                       :port port
+                                       :reuse-address t)
+                   (iolib:listen-on socket :backlog 5)
+                   (bt:make-thread
+                    (lambda ()
+                      (unwind-protect
+                           (loop
+                              (let ((stream (iolib:accept-connection socket :wait t)))
+                                (lparallel.queue:push-queue stream channel)))
+                        (close socket)))))
+                 (bt:make-thread
+                  (lambda ()
+                    (loop (let ((stream (lparallel.queue:pop-queue keepalive)))
+                            (if (listen stream)
+                                (lparallel.queue:push-queue stream channel)
+                                (lparallel.queue:push-queue stream keepalive))))))
+                 (loop repeat worker-threads
+                    collect
+                      (bt:make-thread
+                       (lambda ()
+                         (loop
+                            (let ((stream (lparallel.queue:pop-queue channel)))
+                              (handler-case (bt:with-timeout (5) (funcall handler stream))
+                                (bt:timeout (e) e))
+                              (lparallel.queue:push-queue stream keepalive)))))))))
     (lambda ()
       (progn (loop for thread in pooled-worker-threads
                 do (ignore-errors
@@ -170,7 +176,6 @@
        for (left right) = (split "=" item)
        collect (cons (urlencode:urldecode left :lenientp t :queryp t)
                      (urlencode:urldecode right :lenientp t :queryp t)))))
-
 (defun process-http (server stream)
   (let* ((ssl-stream stream)
          (res (list (cons :headers-written nil)
@@ -188,16 +193,21 @@
          (handler-case
              (progn
                (nconc req (http-protocol-reader ssl-stream))
-               (http-protocol-writer res
-                                     (call-route (routes server) req res)
-                                     ssl-stream))
+               (http-response ssl-stream (call-route (routes server) req res) res))
            (bt:timeout (e) e)
            (t (e) (setf (cdr (assoc "Content-Type" res :test #'equal)) "text/plain")
-              (http-protocol-writer res (with-output-to-string (*standard-output*)
+              (http-response ssl-stream (with-output-to-string (*standard-output*)
                                           (princ e)
                                           (print req)
-                                          (print res))
-                                    ssl-stream))))))
+                                          (print res)) res))))))
+
+(defun http-response (stream response res)
+  (unless (assoc "Content-Length" res :test #'equal)
+    (nconc res (list (cons "Content-Length" (princ-to-string (length response))))))
+  (http-protocol-writer res
+                        response
+                        stream)
+  (force-output stream))
 
 (defun default-start-function (server port worker-threads)
   (run-server port
