@@ -18,7 +18,6 @@
 (in-package :stampede)
 
 (defun run-server (port handler &key (worker-threads 1))
-  (declare (optimize (safety 3)))
   (let* ((socket (iolib:make-socket :connect :passive
                                     :address-family :internet
                                     :type :stream
