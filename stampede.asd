@@ -13,5 +13,5 @@
                :alexandria
                :anaphora
                :local-time
-               :lparallel)
+               :sb-concurrency)
   :components ((:file "stampede")))

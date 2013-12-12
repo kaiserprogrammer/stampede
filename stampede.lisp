@@ -22,7 +22,7 @@
                                     :address-family :internet
                                     :type :stream
                                     :external-format :latin1))
-         (channel (lparallel.queue:make-queue))
+         (channel (sb-concurrency:make-mailbox))
          (pooled-worker-threads
           (list* (progn
                    (iolib:bind-address socket iolib:+ipv4-unspecified+
@@ -34,7 +34,7 @@
                       (unwind-protect
                            (loop
                               (let ((stream (iolib:accept-connection socket :wait t)))
-                                (lparallel.queue:push-queue stream channel)))
+                                (sb-concurrency:send-message channel stream)))
                         (iolib.sockets:shutdown socket :read t :write t)
                         (close socket)))
                     :name "acceptor"))
@@ -44,9 +44,8 @@
                       (bt:make-thread
                        (lambda ()
                          (loop
-                            (let ((stream (handler-case (bt:with-timeout (1)
-                                                          (lparallel.queue:pop-queue channel))
-                                            (bt:timeout (e) (declare (ignore e)) nil))))
+                            (let ((stream (handler-case (sb-concurrency:receive-message channel :timeout 1)
+                                            (sb-concurrency::timeout (e) (declare (ignore e)) nil))))
                               (when stream
                                 (handler-case (bt:with-timeout (5)
                                                 (unwind-protect
