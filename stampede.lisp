@@ -68,7 +68,9 @@
             :reader running?)
    (workers :initform 1
             :initarg :workers
-            :accessor workers)))
+            :accessor workers)
+   (port :initarg :port
+         :accessor port)))
 
 (defgeneric stop (server))
 (defmethod stop ((server http-server))
@@ -218,15 +220,15 @@
                         stream)
   (force-output stream))
 
-(defun default-start-function (server port)
-  (run-server port
+(defun default-start-function (server)
+  (run-server (port server)
               (lambda (stream) (process-http server stream))
               :worker-threads (workers server)))
 
 (defun make-http-server (port &key (worker-threads 1))
-  (let* ((server (make-instance 'http-server :workers worker-threads))
+  (let* ((server (make-instance 'http-server :workers worker-threads :port port))
          (start-function
-          (lambda () (default-start-function server port))))
+          (lambda () (default-start-function server))))
     (setf (slot-value server 'start-function) start-function)
     server))
 
