@@ -244,21 +244,29 @@
       (setf (slot-value server 'stop-function) stop-function)))
   server)
 
+(define-condition no-route-found (error)
+  ((url :accessor url :initarg :url))
+  (:report (lambda (c s)
+             (format s "No route found for url: ~s" (url c)))))
+
 (defun call-route (routes req res)
   (let* ((url (cdr (assoc :url req)))
          (method (cdr (assoc :method req))))
-    (loop for route in (cdr (assoc method routes :test #'string=))
-       for (match . groups) = (multiple-value-bind (match groups)
-                                  (scan-to-strings (car route) url)
-                                (cons match groups))
-       when match
-       return (progn
-                (when (not (alexandria:emptyp groups))
-                  (loop for value across (the simple-vector groups)
-                     for key in (cadr route)
-                     do (push (cons key value) (cdr (assoc :params req)))))
-                (funcall (the function (cddr route)) req res)))))
-
+    (let ((action
+           (loop for route in (cdr (assoc method routes :test #'string=))
+              for (match . groups) = (multiple-value-bind (match groups)
+                                         (scan-to-strings (car route) url)
+                                       (cons match groups))
+              when match
+              return (progn
+                       (when (not (alexandria:emptyp groups))
+                         (loop for value across (the simple-vector groups)
+                            for key in (cadr route)
+                            do (push (cons key value) (cdr (assoc :params req)))))
+                       (funcall (the function (cddr route)) req res)))))
+      (if action
+          action
+          (error 'no-route-found :url url)))))
 
 (defun defroute (server method reg fun)
   (add-routing-method server method)
