@@ -17,7 +17,7 @@
    :write-response))
 (in-package :stampede)
 
-(defun run-server (port handler &key (worker-threads 1))
+(defun run-server (port handler &key (worker-threads 1) (debug t))
   (let* ((socket (iolib:make-socket :connect :passive
                                     :address-family :internet
                                     :type :stream
@@ -52,7 +52,10 @@
                                                      (funcall handler stream)
                                                   (close stream)))
                                   (bt:timeout (e) (declare (ignore e)) (close stream))
-                                  (t (e) (declare (ignore e)) (close stream)))))))
+                                  (t (e) (unwind-protect
+                                              (when debug
+                                                (error e))
+                                           (close stream))))))))
                        :name (format nil "worker~a" i))))))
     (lambda ()
       (progn (loop for thread in pooled-worker-threads
@@ -70,7 +73,10 @@
             :initarg :workers
             :accessor workers)
    (port :initarg :port
-         :accessor port)))
+         :accessor port)
+   (debug-mode :initarg :debug-mode
+               :initform nil
+               :accessor debug-mode)))
 
 (defgeneric stop (server))
 (defmethod stop ((server http-server))
@@ -202,11 +208,14 @@
                (nconc req (http-protocol-reader ssl-stream))
                (http-response ssl-stream (call-route (routes server) req res) res))
            (bt:timeout (e) e)
-           (t (e) (setf (cdr (assoc "Content-Type" res :test #'equal)) "text/plain")
-              (http-response ssl-stream (with-output-to-string (*standard-output*)
-                                          (princ e)
-                                          (print req)
-                                          (print res)) res)))
+           (t (e)
+             (if (debug-mode server)
+                 (error e)
+                 (progn (setf (cdr (assoc "Content-Type" res :test #'equal)) "text/plain")
+                        (http-response ssl-stream (with-output-to-string (*standard-output*)
+                                                    (princ e)
+                                                    (print req)
+                                                    (print res)) res)))))
       (when (or (equal "1.0" (cdr (assoc :version req)))
                 (equal (cdr (assoc "Connection" req :test #'equal)) "close"))
         (close stream)
@@ -223,10 +232,11 @@
 (defun default-start-function (server)
   (run-server (port server)
               (lambda (stream) (process-http server stream))
-              :worker-threads (workers server)))
+              :worker-threads (workers server)
+              :debug (debug-mode server)))
 
-(defun make-http-server (port &key (worker-threads 1))
-  (let* ((server (make-instance 'http-server :workers worker-threads :port port))
+(defun make-http-server (port &key (worker-threads 1) (debug-mode nil))
+  (let* ((server (make-instance 'http-server :workers worker-threads :port port :debug-mode debug-mode))
          (start-function
           (lambda () (default-start-function server))))
     (setf (slot-value server 'start-function) start-function)
