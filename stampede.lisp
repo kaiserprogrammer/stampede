@@ -242,8 +242,8 @@
     (setf (slot-value server 'start-function) start-function)
     server))
 
-(defun run-http-server (port &key (worker-threads 1))
-  (let ((server (make-http-server port :worker-threads worker-threads)))
+(defun run-http-server (port &key (worker-threads 1) (debug-mode nil))
+  (let ((server (make-http-server port :worker-threads worker-threads :debug-mode debug-mode)))
     (start server)))
 
 (defmethod start ((server http-server))
