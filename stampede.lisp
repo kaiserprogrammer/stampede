@@ -116,10 +116,14 @@
             (if (string= method "GET")
                 (list* (cons :params params)
                        (read-get-request stream))
-                (read-post-request stream)))))
+                (let ((req (read-post-request stream)))
+                  (cons (cons :method (string-upcase
+                                       (or (cdr (assoc "_method" (cdr (assoc :params req)) :test #'string=))
+                                           method)))
+                        req))))))
 
 (defun read-post-request (stream)
-  (let* ((length nil)
+  (let* ((length 0)
          (req
           (loop for line = (my-read-line stream)
              when (string= line "")
@@ -134,10 +138,7 @@
                            (progn (setf length (parse-integer (subseq line 16)))
                                   (cons :content-length length))
                            (cons (first data) (string-trim " " (second data))))))))
-    (cons (cons :method (string-upcase
-                         (or (cdr (assoc "_method" (cdr (assoc :params req)) :test #'string=))
-                             "POST")))
-          req)))
+    req))
 
 (defun read-get-request (stream)
   (cons (cons :method "GET")
