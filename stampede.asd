@@ -13,5 +13,6 @@
                :alexandria
                :anaphora
                :local-time
+               :supervisor
                :sb-concurrency)
   :components ((:file "stampede")))
