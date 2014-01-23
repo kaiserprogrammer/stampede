@@ -5,44 +5,44 @@
 (remove-tests)
 
 (define-test creating-closing-server ()
-  (let ((server (run-server 8080
+  (let ((server (run-server 9123
                             (lambda (stream)
                               (declare (ignore stream))))))
+    (sleep 0.002)
     (unwind-protect
          (progn
            (stop server)
-           (sleep 0.002)              ; wait for server to shutdown
            (assert-error 'connection-refused-error
-             (with-client-socket (socket stream "127.0.0.1" 8080)
+             (with-client-socket (socket stream "127.0.0.1" 9123)
                (declare (ignore stream)))))
       (stop server))
-    (let ((server (run-server 8080
+    (let ((server (run-server 9123
                               (lambda (stream)
                                 (declare (ignore stream))))))
+      (sleep 0.002)
       (unwind-protect
            (progn
              (stop server)
-             (sleep 0.002)            ; wait for server to shutdown
              (assert-error 'connection-refused-error
-               (with-client-socket (socket stream "127.0.0.1" 8080)
+               (with-client-socket (socket stream "127.0.0.1" 9123)
                  (declare (ignore stream))))
              (stop server))
         (stop server)))))
 
 (define-test connecting-to-server ()
   (let* (answer
-         (server (run-server 8080
+         (server (run-server 9123
                              (lambda (stream)
                                (setf answer (read-line stream))))))
+    (sleep 0.002)
     (unwind-protect
          (progn
-           (with-client-socket (socket stream "127.0.0.1" 8080)
+           (with-client-socket (socket stream "127.0.0.1" 9123)
              (format stream "client says~%")
              (force-output stream))
-           (sleep 0.004)
+           (sleep 0.04)
            (assert-equal "client says" answer)
-           (stop server)
-           (sleep 0.004))
+           (stop server))
       (stop server))))
 
 (define-test http-protocol-reader-get ()

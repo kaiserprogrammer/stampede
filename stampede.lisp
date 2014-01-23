@@ -18,49 +18,49 @@
 (in-package :stampede)
 
 (defun run-server (port handler &key (worker-threads 1) (debug t))
-  (let* ((socket (iolib:make-socket :connect :passive
-                                    :address-family :internet
-                                    :type :stream
-                                    :external-format :latin1))
-         (channel (sb-concurrency:make-mailbox))
-         (pooled-worker-threads
-          (list* (progn
-                   (iolib:bind-address socket iolib:+ipv4-unspecified+
-                                       :port port
-                                       :reuse-address t)
-                   (iolib:listen-on socket :backlog 200)
-                   (bt:make-thread
-                    (lambda ()
-                      (unwind-protect
-                           (loop
-                              (let ((stream (iolib:accept-connection socket :wait t)))
-                                (sb-concurrency:send-message channel stream)))
-                        (iolib.sockets:shutdown socket :read t :write t)
-                        (close socket)))
-                    :name "acceptor"))
-                 (loop repeat worker-threads
-                    for i from 1
-                    collect
-                      (bt:make-thread
-                       (lambda ()
-                         (loop
-                            (let ((stream (handler-case (sb-concurrency:receive-message channel :timeout 1)
-                                            (sb-concurrency::timeout (e) (declare (ignore e)) nil))))
-                              (when stream
-                                (handler-case (bt:with-timeout (5)
-                                                (unwind-protect
-                                                     (funcall handler stream)
-                                                  (close stream)))
-                                  (bt:timeout (e) (declare (ignore e)) (close stream))
-                                  (t (e) (unwind-protect
-                                              (when debug
-                                                (error e))
-                                           (close stream))))))))
-                       :name (format nil "worker~a" i))))))
+  (let* ((channel (sb-concurrency:make-mailbox))
+         (super (supervisor:make-supervisor)))
+    (supervisor:add-lambda super
+                      (lambda ()
+                        (let ((socket (iolib:make-socket :connect :passive
+                                                         :address-family :internet
+                                                         :type :stream
+                                                         :external-format :latin1)))
+                          (unwind-protect
+                               (progn
+                                 (iolib:bind-address socket iolib:+ipv4-unspecified+
+                                                     :port port
+                                                     :reuse-address t)
+                                 (iolib:listen-on socket :backlog 200)
+                                 (loop
+                                    (let ((stream (iolib:accept-connection socket :wait t)))
+                                      (sb-concurrency:send-message channel stream))))
+                            (ignore-errors (iolib.sockets:shutdown socket :read t :write t))
+                            (ignore-errors (close socket)))))
+                      :name "acceptor")
+    (loop repeat worker-threads
+       for i from 1
+       do (supervisor:add-lambda
+           super
+           (lambda ()
+             (loop
+                (let ((stream (handler-case (sb-concurrency:receive-message channel :timeout 1)
+                                (sb-concurrency::timeout (e) (declare (ignore e)) nil))))
+                  (when stream
+                    (handler-case (bt:with-timeout (5)
+                                    (unwind-protect
+                                         (funcall handler stream)
+                                      (close stream)))
+                      (bt:timeout (e) (declare (ignore e)) (close stream))
+                      (t (e) (unwind-protect
+                                  (when debug
+                                    (error e))
+                               (close stream))))))))
+           :name (format nil "worker~a" i)))
+    (supervisor:start super)
     (lambda ()
-      (progn (loop for thread in pooled-worker-threads
-                do (ignore-errors
-                     (bt:destroy-thread thread)))))))
+      (supervisor:stop super)
+      (supervisor:join super))))
 
 (defclass http-server ()
   ((routes :initform (list (list "GET"))
