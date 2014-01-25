@@ -116,16 +116,16 @@
   (buffer #() :type simple-vector)
   (mask 0 :type fixnum)
   (size 0 :type fixnum)
-  (p1 0) (p2 0) (p3 0) (p4 0) (p5 0) (p6 0) (p7 0) (p8 0) (p9 0)
+  p1 p2 p3 p4 p5
   (tail 0 :type fixnum)
-  (r1 0) (r2 0) (r3 0) (r4 0) (r5 0) (r6 0) (r7 0) (r8 0) (r9 0)
+  r1 r2 r3 r4 r5
   (head 0 :type fixnum))
 
 (defun make-array-queue (capacity)
   (let ((size (expt 2 (ceiling (log capacity 2)))))
     (make-conc :mask (1- size) :size size :buffer (make-array (list size) :initial-element nil))))
 (defun offer (queue value)
-  (declare (optimize (speed 3) (safety 0)))
+  (declare (optimize (speed 3) (safety 0) (compilation-speed 3) (debug 0)))
   (sb-thread:barrier (:read)
     (if (null value)
         (error 'nil-value)
@@ -140,7 +140,7 @@
                 (incf (conc-tail queue))))))))
 
 (defun take (queue)
-  (declare (optimize (speed 3) (safety 0)))
+  (declare (optimize (speed 3) (safety 0) (compilation-speed 3) (debug 0)))
   (sb-thread:barrier (:read)
     (let ((head (conc-head queue)))
       (if (>= head (conc-tail queue) 0)
