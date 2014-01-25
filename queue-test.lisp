@@ -112,19 +112,21 @@
            (ops (round (/ (* repitions 1000) duration))))
       (format t "ops/sec=~a -" ops))))
 
-(defstruct conc (buffer #() :type simple-vector)
-           (mask 0 :type fixnum)
-           (size 0 :type fixnum)
-           (q1 0) (q2 0) (q3 0) (q4 0) (q5 0) (q6 0) (q7 0) (q8 0) (q9 0)
-           (tail 0 :type fixnum)
-           (r1 0) (r2 0) (r3 0) (r4 0) (r5 0) (r6 0) (r7 0) (r8 0) (r9 0)
-           (head 0 :type fixnum))
+(defstruct conc
+  (buffer #() :type simple-vector)
+  (mask 0 :type fixnum)
+  (size 0 :type fixnum)
+  (p1 0) (p2 0) (p3 0) (p4 0) (p5 0) (p6 0) (p7 0) (p8 0) (p9 0)
+  (tail 0 :type fixnum)
+  (r1 0) (r2 0) (r3 0) (r4 0) (r5 0) (r6 0) (r7 0) (r8 0) (r9 0)
+  (head 0 :type fixnum))
 
 (defun make-array-queue (capacity)
   (let ((size (expt 2 (ceiling (log capacity 2)))))
     (make-conc :mask (1- size) :size size :buffer (make-array (list size) :initial-element nil))))
 (defun offer (queue value)
   (declare (optimize (speed 3) (safety 0)))
+  (sb-thread:barrier (:data-dependency))
   (if (null value)
       (error 'nil-value)
       (let* ((tail (conc-tail queue))
@@ -133,12 +135,13 @@
         (declare (type fixnum tail size wrap))
         (if (<= (conc-head queue) wrap)
             nil
-            (progn (setf (svref (conc-buffer queue) (logand tail (conc-mask queue))) value)
-                   (incf (conc-tail queue))
-                   t)))))
+            (progn
+              (setf (svref (conc-buffer queue) (logand tail (conc-mask queue))) value)
+              (incf (conc-tail queue)))))))
 
 (defun take (queue)
   (declare (optimize (speed 3) (safety 0)))
+  (sb-thread:barrier (:data-dependency))
   (let ((head (conc-head queue)))
     (if (>= head (conc-tail queue) 0)
         nil
@@ -178,6 +181,8 @@
                                         (declare (type fixnum i))
                                         (do ()
                                             ((offer queue i))
+                                          ;; better result than
+                                          ;; bt:thread-yield
                                           (sleep 0.0000001)))))))
       (do ((i 0 (1+ i)))
           ((= i repitions))
