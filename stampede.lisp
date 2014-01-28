@@ -17,8 +17,50 @@
    :write-response))
 (in-package :stampede)
 
+(defvar +message+ (sb-ext:string-to-octets "HTTP/1.1 200
+Location: /path/to/
+Content-Type: text/html; charset=utf-8
+Content-Length: 4
+
+blub"))
+
+(defstruct conc (buffer #() :type simple-vector)
+           (mask 0 :type fixnum)
+           (size 0 :type fixnum)
+           (q1 0) (q2 0) (q3 0) (q4 0) (q5 0) (q6 0) (q7 0)
+           (tail 0 :type fixnum)
+           (r1 0) (r2 0) (r3 0) (r4 0) (r5 0) (r6 0) (r7 0)
+           (head 0 :type fixnum))
+(defun make-array-queue (capacity)
+  (let ((size (expt 2 (ceiling (log capacity 2)))))
+    (make-conc :mask (1- size) :size size :buffer (make-array (list size) :initial-element nil))))
+(defun offer (queue value)
+  (declare (optimize (speed 3) (safety 0)))
+  (if (null value)
+      (error 'nil-value)
+      (let* ((tail (conc-tail queue))
+             (size (conc-size queue))
+             (wrap (- tail size)))
+        (declare (type fixnum tail size wrap))
+        (if (<= (conc-head queue) wrap)
+            nil
+            (progn (setf (svref (conc-buffer queue) (logand tail (conc-mask queue))) value)
+                   (incf (conc-tail queue))
+                   t)))))
+
+(defun take (queue)
+  (declare (optimize (speed 3) (safety 0)))
+  (let ((head (conc-head queue)))
+    (if (>= head (conc-tail queue) 0)
+        nil
+        (let* ((index (logand head (conc-mask queue)))
+               (e (svref (conc-buffer queue) index)))
+          (setf (svref (conc-buffer queue) index) nil)
+          (incf (conc-head queue))
+          e))))
+
 (defun run-server (port handler &key (worker-threads 1) (debug t))
-  (let* ((channel (sb-concurrency:make-mailbox))
+  (let* ((channel (make-array-queue 1024))
          (super (supervisor:make-supervisor)))
     (supervisor:add-lambda super
                       (lambda ()
@@ -31,10 +73,9 @@
                                  (iolib:bind-address socket iolib:+ipv4-unspecified+
                                                      :port port
                                                      :reuse-address t)
-                                 (iolib:listen-on socket :backlog 200)
+                                 (iolib:listen-on socket :backlog 20)
                                  (loop
-                                    (let ((stream (iolib:accept-connection socket :wait t)))
-                                      (sb-concurrency:send-message channel stream))))
+                                    (offer channel (iolib:accept-connection socket))))
                             (ignore-errors (iolib.sockets:shutdown socket :read t :write t))
                             (ignore-errors (close socket)))))
                       :name "acceptor")
@@ -44,13 +85,14 @@
            super
            (lambda ()
              (loop
-                (let ((stream (handler-case (sb-concurrency:receive-message channel :timeout 1)
-                                (sb-concurrency::timeout (e) (declare (ignore e)) nil))))
+                (let ((stream (do ((stream (take channel) (take channel)))
+                                  (stream stream)
+                                (sleep 0.00001))))
                   (when stream
-                    (handler-case (bt:with-timeout (5)
-                                    (unwind-protect
-                                         (funcall handler stream)
-                                      (close stream)))
+                    (handler-case (unwind-protect
+                                       (bt:with-timeout (5)
+                                         (funcall handler stream))
+                                    (close stream))
                       (bt:timeout (e) (declare (ignore e)) (close stream))
                       (t (e) (unwind-protect
                                   (when debug
