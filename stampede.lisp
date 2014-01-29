@@ -17,6 +17,8 @@
    :write-response))
 (in-package :stampede)
 
+(declaim (optimize (speed 3) (safety 0) (compilation-speed 3) (debug 0)))
+
 (defvar +message+ (sb-ext:string-to-octets "HTTP/1.1 200
 Location: /path/to/
 Content-Type: text/html; charset=utf-8
@@ -60,6 +62,8 @@ blub"))
           e))))
 
 (defun run-server (port handler &key (worker-threads 1) (debug t))
+  (declare (optimize (speed 3) (safety 0) (compilation-speed 3) (debug 0)))
+  (declare (type function handler))
   (let* ((channel (make-array-queue 1024))
          (super (supervisor:make-supervisor)))
     (supervisor:add-lambda super
@@ -87,7 +91,7 @@ blub"))
              (loop
                 (let ((stream (do ((stream (take channel) (take channel)))
                                   (stream stream)
-                                (sleep 0.00001))))
+                                (sleep 0.001))))
                   (when stream
                     (handler-case (unwind-protect
                                        (bt:with-timeout (5)
@@ -132,7 +136,7 @@ blub"))
 (defun my-read-line (stream)
   (bt:with-timeout (1)
     (with-output-to-string (str)
-      (loop for byte = (read-byte stream nil nil)
+      (loop for byte = (the fixnum (read-byte stream nil nil))
          while byte
          when (= byte 13)
          do (progn (read-byte stream)
@@ -150,8 +154,8 @@ blub"))
                        (error 'simple-error))))
          (method (svref groups 0))
          (parsed-url (parse-url (svref groups 1)))
-         (url (elt parsed-url 0))
-         (params (elt parsed-url 1))
+         (url (nth 0 parsed-url))
+         (params (nth 1 parsed-url))
          (http-protocol-version (svref groups 3)))
     (append (list (cons :url url)
                   (cons :version http-protocol-version))
@@ -179,7 +183,8 @@ blub"))
                        (if (string= "Content-Length" (first data))
                            (progn (setf length (parse-integer (subseq line 16)))
                                   (cons :content-length length))
-                           (cons (first data) (string-trim " " (second data))))))))
+                           (cons (first data) (string-trim " " (the simple-string (second data)))))))))
+    (declare (type fixnum length))
     req))
 
 (defun read-get-request (stream)
@@ -187,7 +192,7 @@ blub"))
         (loop for line = (my-read-line stream)
            until (or (string= "" line))
            collect (let ((data (split ":" line :limit 2)))
-                     (cons (first data) (string-trim " " (second data)))))))
+                     (cons (first data) (string-trim " " (the simple-string (second data))))))))
 
 (defun write-headers (data)
   (anaphora:swhen (assoc :headers-written data)
@@ -220,7 +225,7 @@ blub"))
 
 (defun parse-url (url)
   (let* ((splitted-url (split "\\?" url))
-         (url (elt splitted-url 0))
+         (url (nth 0 splitted-url))
          (query (when (> (length splitted-url) 1)
                   (elt splitted-url 1))))
     (list
@@ -267,6 +272,7 @@ blub"))
         :closed))))
 
 (defun http-response (stream response res)
+  (declare (type simple-string response))
   (unless (assoc "Content-Length" res :test #'equal)
     (nconc res (list (cons "Content-Length" (princ-to-string (length response))))))
   (http-protocol-writer res
@@ -343,6 +349,7 @@ blub"))
     (nconc (routes server) (list (list method)))))
 
 (defun extract-params-from-regex (reg)
+  (declare (type simple-string reg))
   (let (params)
     (do-register-groups (param) (":(\\w+)" reg)
       (push (make-keyword (string-upcase param)) params))
