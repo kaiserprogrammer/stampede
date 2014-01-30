@@ -238,6 +238,7 @@
   (buffer #() :type simple-vector)
   (mask 0 :type fixnum)
   (size 0 :type fixnum)
+  (cached-min 0 :type fixnum)
   p1 p2 p3 p4 p5
   (cursor 0 :type fixnum)
   r1 r2 r3 r4 r5
@@ -255,22 +256,26 @@
 
 (defun write-dis (dis value)
   (declare (optimize (speed 3) (safety 0) (space 0) (compilation-speed 0) (debug 0)))
-  (sb-thread:barrier (:read)
-    (if (null value)
-        (error 'nil-value)
-        (let* ((cursor (dis-cursor dis))
-               (size (dis-size dis))
-               (wrap (- cursor size)))
-          (declare (type fixnum cursor size wrap))
-          (let ((min (expt 2 61)))
-            (declare (type fixnum min))
-            (dolist (reader (dis-readers dis))
-              (setf min (min min (reader-cursor reader))))
-            (if (<= min wrap)
-                nil
-                (progn
-                  (setf (svref (dis-buffer dis) (logand cursor (dis-mask dis))) value)
-                  (incf (dis-cursor dis)))))))))
+  (if (null value)
+      (error 'nil-value)
+      (let* ((cursor (dis-cursor dis))
+             (size (dis-size dis))
+             (wrap (- cursor size)))
+        (declare (type fixnum cursor size wrap))
+        (if (<= (dis-cached-min dis) wrap)
+            (let ((min (expt 2 61)))
+              (declare (type fixnum min))
+              (dolist (reader (dis-readers dis))
+                (setf min (min min (reader-cursor reader))))
+              (setf (dis-cached-min dis) min)
+              (if (<= min wrap)
+                  nil
+                  (progn
+                    (setf (svref (dis-buffer dis) (logand cursor (dis-mask dis))) value)
+                    (incf (dis-cursor dis)))))
+            (progn
+              (setf (svref (dis-buffer dis) (logand cursor (dis-mask dis))) value)
+              (incf (dis-cursor dis)))))))
 
 (defun read-dis (reader)
   (declare (optimize (speed 3) (safety 0) (space 0) (compilation-speed 0) (debug 0)))
