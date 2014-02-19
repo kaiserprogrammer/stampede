@@ -241,26 +241,27 @@
     (if (null value)
         (error 'nil-value)
         (let* ((tail (conc-tail queue))
-               (size (conc-size queue))
-               (wrap (- tail size)))
-          (declare (type fixnum tail size wrap))
-          (if (<= (conc-head queue) wrap)
+               (index (logand tail (conc-mask queue))))
+          (declare (type fixnum tail index))
+          (if (svref (conc-buffer queue) index)
               nil
               (progn
-                (setf (svref (conc-buffer queue) (logand tail (conc-mask queue))) value)
+                (setf (svref (conc-buffer queue) index) value)
                 (incf (conc-tail queue))))))))
 
 (defun take (queue)
   (declare (optimize (speed 3) (safety 0) (space 0) (compilation-speed 0) (debug 0)))
   (sb-thread:barrier (:read)
-    (let ((head (conc-head queue)))
-      (if (>= head (conc-tail queue) 0)
-          nil
-          (let* ((index (logand head (conc-mask queue)))
-                 (e (svref (conc-buffer queue) index)))
+    (let* ((head (conc-head queue))
+           (index (logand head (conc-mask queue)))
+           (e (svref (conc-buffer queue) index)))
+      (declare (type fixnum head index))
+      (if e
+          (progn
             (setf (svref (conc-buffer queue) index) nil)
             (incf (conc-head queue))
-            e)))))
+            e)
+          nil))))
 
 (defun perf-single-thread-array-test ()
   (declare (optimize (speed 3) (safety 0)))
